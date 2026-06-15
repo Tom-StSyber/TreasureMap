@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- top unit -->
+  <rect x="8" y="10" width="48" height="13" rx="2" stroke="white" stroke-width="2" fill="none"/>
+  <circle cx="52" cy="16.5" r="2.5" fill="white"/>
+  <line x1="14" y1="16.5" x2="38" y2="16.5" stroke="white" stroke-width="1.5"/>
+  <!-- middle unit -->
+  <rect x="8" y="26" width="48" height="13" rx="2" stroke="white" stroke-width="2" fill="none"/>
+  <circle cx="52" cy="32.5" r="2.5" fill="white"/>
+  <line x1="14" y1="32.5" x2="38" y2="32.5" stroke="white" stroke-width="1.5"/>
+  <!-- bottom unit -->
+  <rect x="8" y="42" width="48" height="13" rx="2" stroke="white" stroke-width="2" fill="none"/>
+  <circle cx="52" cy="48.5" r="2.5" fill="white"/>
+  <line x1="14" y1="48.5" x2="38" y2="48.5" stroke="white" stroke-width="1.5"/>
+</svg>

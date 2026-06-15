@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- chassis rectangle -->
+  <rect x="6" y="22" width="52" height="20" rx="3" stroke="white" stroke-width="2.5" fill="none"/>
+  <!-- port slots (6) -->
+  <rect x="12" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
+  <rect x="21" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
+  <rect x="30" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
+  <rect x="39" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
+  <rect x="48" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
+  <!-- uplink arrows -->
+  <line x1="20" y1="22" x2="20" y2="14" stroke="white" stroke-width="2"/>
+  <polyline points="16,18 20,14 24,18" stroke="white" stroke-width="2" fill="none" stroke-linejoin="round"/>
+  <line x1="44" y1="42" x2="44" y2="50" stroke="white" stroke-width="2"/>
+  <polyline points="40,46 44,50 48,46" stroke="white" stroke-width="2" fill="none" stroke-linejoin="round"/>
+</svg>

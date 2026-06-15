@@ -1,0 +1,44 @@
+---
+platform: cisco_ios
+command: show version
+hostname: R1
+---
+Cisco IOS Software, Version 15.2(4)M7, RELEASE SOFTWARE (fc4)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2014 by Cisco Systems, Inc.
+
+ROM: System Bootstrap, Version 15.0(1r)M15
+
+R1 uptime is 2 weeks, 3 days, 14 hours, 7 minutes
+System returned to ROM by reload at 08:14:23 UTC Mon May 26 2026
+System image file is "flash0:c2900-universalk9-mz.SPA.152-4.M7.bin"
+
+cisco CISCO2901/K9 (revision 1.0) with 491520K/32768K bytes of memory.
+Processor board ID FTX152400KS
+2 Gigabit Ethernet interfaces
+1 terminal line
+1 Virtual Private Network (VPN) Module
+DRAM configuration is 64 bits wide with parity disabled.
+255K bytes of non-volatile configuration memory.
+250880K bytes of ATA System CompactFlash 0 (Read/Write)
+
+License Info:
+
+License UDI:
+
+Device#   PID                   SN
+*0        CISCO2901/K9          FTX152400KS
+
+
+
+Technology Package License Information for Module:'c2900'
+
+-----------------------------------------------------------------
+Technology    Technology-package           Technology-package
+              Current       Type           Next reboot
+-----------------------------------------------------------------
+ipbase        ipbasek9      Permanent      ipbasek9
+security      securityk9    Permanent      securityk9
+data          None          None           None
+
+Configuration register is 0x2102

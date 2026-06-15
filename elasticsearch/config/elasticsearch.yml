@@ -1,0 +1,30 @@
+# ── TreasureMap — Elasticsearch configuration (single-node dev) ────────────────
+#
+# This file is copied into the Elasticsearch installation by the installer
+# scripts. Do NOT store credentials here — this file is committed to git.
+#
+cluster.name: treasuremap
+node.name: node-1
+
+# Data and log paths are set to absolute paths by the installer script.
+# The placeholder tokens below are replaced by sed/PowerShell at install time.
+path.data: __ES_DATA_PATH__
+path.logs: __ES_LOGS_PATH__
+
+# Bind only to localhost — not exposed to the network
+network.host: 127.0.0.1
+http.port: 9200
+
+# Single-node discovery (no cluster formation needed)
+discovery.type: single-node
+
+# Disable security for local development
+# WARNING: Do not use these settings on a production or internet-facing node.
+xpack.security.enabled: false
+xpack.security.http.ssl.enabled: false
+xpack.security.transport.ssl.enabled: false
+
+# Reduce JVM heap for development (installer overrides via ES_JAVA_OPTS env var)
+# Default: 1 GB heap.  Adjust in your shell before starting if memory is tight:
+#   Windows:  set ES_JAVA_OPTS=-Xms512m -Xmx512m
+#   Ubuntu:   export ES_JAVA_OPTS="-Xms512m -Xmx512m"
