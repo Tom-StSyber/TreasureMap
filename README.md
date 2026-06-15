@@ -7,6 +7,9 @@ TreasureMap ingests running-config files from your network devices, parses them 
 ![TreasureMap topology overview](docs/screenshots/topology-overview.png)
 ---
 
+![TreasureMap topology overview](https://github.com/user-attachments/assets/306f6ea8-0adb-481f-bc9b-d0fcc1aaf4be)
+---
+
 ## Quick Start
 
 ### Windows 11
@@ -200,10 +203,4 @@ interface Ethernet0
 - [Installation Guide](docs/INSTALLATION.md) — step-by-step for both paths
 - [Troubleshooting](docs/TROUBLESHOOTING.md) — common errors and fixes
 - [Architecture](docs/ARCHITECTURE.md) — design decisions and data model
-- [Development Guide](docs/DEVELOPMENT.md) — adding parsers, extending the API
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+- [Development Guide](docs/DEVELOPMENT.md) — adding pars
