@@ -25,7 +25,7 @@ from fastapi.responses import StreamingResponse
 from config import IDX_DEVICES, IDX_INTERFACES, IDX_CONNECTIONS, IDX_ACLS
 from es_client import get_es, wipe_indices, bootstrap_indices
 from models import Device, Interface, Connection, Acl, AclRule
-from parsers.ios_config import parse_ios_running_config, scan_folder
+from parsers.ios_config import parse_ios_running_config, is_ios_running_config
 from parsers.juniper import parse_junos_config, is_junos_config
 from parsers.huawei import parse_huawei_config, is_huawei_config
 from parsers.dell import parse_dell_os10_config, is_dell_os10
@@ -34,6 +34,38 @@ from pop_detector import enrich_parsed
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 log = logging.getLogger("ingest")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Multi-vendor folder scanner
+# ──────────────────────────────────────────────────────────────────────────────
+
+_CONFIG_EXTENSIONS = {".cfg", ".conf", ".txt", ".log", ".ios", ".config"}
+
+
+def _scan_folder(folder: Path) -> list[Path]:
+    """
+    Recursively find files that look like any supported network device config.
+    Uses all five vendor detectors so Juniper, Huawei, Dell, and HPE configs
+    are found alongside Cisco configs — not gated on Cisco-only heuristics.
+    """
+    candidates: list[Path] = []
+    for ext in _CONFIG_EXTENSIONS:
+        candidates.extend(folder.rglob(f"*{ext}"))
+
+    results: list[Path] = []
+    for path in sorted(candidates):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if (is_junos_config(text)
+                    or is_huawei_config(text)
+                    or is_dell_os10(text)
+                    or is_hpe_aruba_cx(text)
+                    or is_ios_running_config(text)):
+                results.append(path)
+        except OSError:
+            pass
+    return results
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -402,7 +434,7 @@ async def ingest_stream(folder_path: str, wipe: bool = False):
 
         # ── 1. Scan ──────────────────────────────────────────────────────────
         try:
-            config_files = scan_folder(folder)
+            config_files = _scan_folder(folder)
         except Exception as exc:
             yield _sse("error", {"message": f"Scan failed: {exc}"})
             return
