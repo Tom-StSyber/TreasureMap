@@ -8,8 +8,6 @@
 #   frontend       → http://localhost:3000  (Nginx serving built React app)
 #   kibana         → http://localhost:5601  (optional — ES browser)
 
-version: "3.8"
-
 services:
 
   elasticsearch:
@@ -59,7 +57,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app        # live-reload in dev
-      - ./data:/app/data      # config files accessible inside container
+      - ./data:/external-data # network config files (batfish, samples, etc.)
     restart: unless-stopped
 
   frontend:

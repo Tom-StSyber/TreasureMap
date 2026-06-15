@@ -1,14 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <!-- top unit -->
-  <rect x="8" y="10" width="48" height="13" rx="2" stroke="white" stroke-width="2" fill="none"/>
-  <circle cx="52" cy="16.5" r="2.5" fill="white"/>
-  <line x1="14" y1="16.5" x2="38" y2="16.5" stroke="white" stroke-width="1.5"/>
-  <!-- middle unit -->
-  <rect x="8" y="26" width="48" height="13" rx="2" stroke="white" stroke-width="2" fill="none"/>
-  <circle cx="52" cy="32.5" r="2.5" fill="white"/>
-  <line x1="14" y1="32.5" x2="38" y2="32.5" stroke="white" stroke-width="1.5"/>
-  <!-- bottom unit -->
-  <rect x="8" y="42" width="48" height="13" rx="2" stroke="white" stroke-width="2" fill="none"/>
-  <circle cx="52" cy="48.5" r="2.5" fill="white"/>
-  <line x1="14" y1="48.5" x2="38" y2="48.5" stroke="white" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="u1" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#4a7ab8"/>
+      <stop offset="100%" stop-color="#0a2d5a"/>
+    </linearGradient>
+    <linearGradient id="u2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#3a6aab"/>
+      <stop offset="100%" stop-color="#081f45"/>
+    </linearGradient>
+  </defs>
+  <!-- Drop shadow -->
+  <rect x="9" y="13" width="48" height="40" rx="3" fill="black" opacity="0.28"/>
+  <!-- 1U top -->
+  <rect x="8" y="10" width="48" height="13" rx="2.5" fill="url(#u1)" stroke="#051840" stroke-width="1.5"/>
+  <rect x="8" y="10" width="48" height="4"  rx="2.5" fill="white" opacity="0.2"/>
+  <rect x="11" y="13" width="28" height="7" rx="1" fill="#0a1e40" opacity="0.65"/>
+  <line x1="13" y1="16.5" x2="37" y2="16.5" stroke="#6ec0ff" stroke-width="1.2" opacity="0.8"/>
+  <circle cx="44" cy="16.5" r="2.5" fill="#00e676" opacity="0.9"/>
+  <circle cx="51" cy="16.5" r="2.5" fill="#ffaa00" opacity="0.9"/>
+  <!-- 1U middle -->
+  <rect x="8" y="26" width="48" height="13" rx="2.5" fill="url(#u2)" stroke="#051840" stroke-width="1.5"/>
+  <rect x="8" y="26" width="48" height="4"  rx="2.5" fill="white" opacity="0.15"/>
+  <rect x="11" y="29" width="28" height="7" rx="1" fill="#0a1e40" opacity="0.65"/>
+  <line x1="13" y1="32.5" x2="37" y2="32.5" stroke="#6ec0ff" stroke-width="1.2" opacity="0.8"/>
+  <circle cx="44" cy="32.5" r="2.5" fill="#00e676" opacity="0.9"/>
+  <circle cx="51" cy="32.5" r="2.5" fill="#00e676" opacity="0.9"/>
+  <!-- 1U bottom -->
+  <rect x="8" y="42" width="48" height="13" rx="2.5" fill="url(#u1)" stroke="#051840" stroke-width="1.5"/>
+  <rect x="8" y="42" width="48" height="4"  rx="2.5" fill="white" opacity="0.2"/>
+  <rect x="11" y="45" width="28" height="7" rx="1" fill="#0a1e40" opacity="0.65"/>
+  <line x1="13" y1="48.5" x2="37" y2="48.5" stroke="#6ec0ff" stroke-width="1.2" opacity="0.8"/>
+  <circle cx="44" cy="48.5" r="2.5" fill="#00e676" opacity="0.9"/>
+  <circle cx="51" cy="48.5" r="2.5" fill="#ffaa00" opacity="0.9"/>
 </svg>

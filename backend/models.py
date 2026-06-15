@@ -23,6 +23,8 @@ class Device(BaseModel):
     device_type: str                    # router | switch | firewall | server | host
     location: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
+    pop: Optional[str] = None            # Point of Presence code (e.g. "EQX-NYC")
+    role: Optional[str] = None           # gateway | switch | firewall | oob | loadbalancer | wireless
 
 
 # ---------------------------------------------------------------------------

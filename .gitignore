@@ -71,3 +71,11 @@ data/devnet-sandboxes/
 
 # ── Root-level venv (should be backend/.venv) ─────────────────────────────────
 /.venv/
+
+# ── Cisco icon pack (EPS / JPG — large binary files, download separately) ────
+# Download from: https://www.cisco.com/c/en/us/about/brand-center/network-topology-icons.html
+frontend/public/icons/*.eps
+frontend/public/icons/*.jpg
+frontend/public/icons/*.jpeg
+frontend/public/icons/Icon_Cache.db
+frontend/public/icons/test.txt

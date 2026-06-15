@@ -6,3 +6,4 @@ pydantic-core==2.46.4
 python-dotenv==1.0.1
 networkx==3.3
 ipaddress; python_version<"3.3"
+python-multipart>=0.0.9

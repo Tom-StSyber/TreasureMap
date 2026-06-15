@@ -1,16 +1,13 @@
 """
 TreasureMap — /ingest endpoint.
 
-GET /ingest/stream?folder_path=<path>&wipe=<bool>
-  Server-Sent Events stream:
-    {"type":"start",  "folder": str, "wipe": bool}
-    {"type":"scan",   "found": int}
-    {"type":"file",   "name": str, "status": "ok"|"skip"|"error",
-                      "hostname": str, "devices": int, "interfaces": int,
-                      "acls": int, "error": str}
-    {"type":"link",   "connections": int}
-    {"type":"done",   "summary": {devices,interfaces,connections,acls,errors}}
-    {"type":"error",  "message": str}
+GET  /ingest/stream?folder_path=<path>&wipe=<bool>
+  Server-Sent Events stream for batch folder ingestion.
+
+POST /ingest/upload
+  Accepts a single config file upload with an optional vendor hint.
+  Returns parsed device metadata (hostname, pop, role, interface count, etc.)
+  and indexes the device + interfaces into Elasticsearch.
 """
 from __future__ import annotations
 
@@ -20,15 +17,20 @@ import logging
 import re
 import uuid
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 
 from config import IDX_DEVICES, IDX_INTERFACES, IDX_CONNECTIONS, IDX_ACLS
 from es_client import get_es, wipe_indices, bootstrap_indices
 from models import Device, Interface, Connection, Acl, AclRule
 from parsers.ios_config import parse_ios_running_config, scan_folder
+from parsers.juniper import parse_junos_config, is_junos_config
+from parsers.huawei import parse_huawei_config, is_huawei_config
+from parsers.dell import parse_dell_os10_config, is_dell_os10
+from parsers.hpe import parse_hpe_aruba_cx_config, is_hpe_aruba_cx
+from pop_detector import enrich_parsed
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 log = logging.getLogger("ingest")
@@ -75,9 +77,44 @@ def _build_device(parsed: dict) -> Device:
         vendor=parsed["vendor"],
         model=parsed.get("model") or "",
         os=parsed["os"],
-        device_type=parsed["device_type"],
+        device_type=parsed.get("device_type", "switch"),
         tags=[parsed["vendor"].lower(), parsed["os"].lower()],
+        pop=parsed.get("pop"),
+        role=parsed.get("role"),
     )
+
+
+def _dispatch_parser(text: str, source_path: Path, vendor_hint: str = "") -> dict:
+    """
+    Auto-detect config format and parse.  vendor_hint overrides auto-detection
+    when the user explicitly selects a vendor (e.g. from the upload UI).
+    Always enriches the result with POP/role via pop_detector.
+    """
+    hint = vendor_hint.lower()
+    if hint in ("juniper", "junos"):
+        parsed = parse_junos_config(text, source_path)
+    elif hint in ("huawei", "vrp"):
+        parsed = parse_huawei_config(text, source_path)
+    elif hint in ("dell", "os10"):
+        parsed = parse_dell_os10_config(text, source_path)
+    elif hint in ("hpe", "aruba", "aruba-cx", "arubacx"):
+        parsed = parse_hpe_aruba_cx_config(text, source_path)
+    elif hint in ("cisco", "ios"):
+        parsed = parse_ios_running_config(text, source_path)
+    else:
+        # Auto-detect — order matters: most distinctive signatures first
+        if is_junos_config(text):
+            parsed = parse_junos_config(text, source_path)
+        elif is_huawei_config(text):
+            parsed = parse_huawei_config(text, source_path)
+        elif is_dell_os10(text):
+            parsed = parse_dell_os10_config(text, source_path)
+        elif is_hpe_aruba_cx(text):
+            parsed = parse_hpe_aruba_cx_config(text, source_path)
+        else:
+            parsed = parse_ios_running_config(text, source_path)
+    enrich_parsed(parsed)
+    return parsed
 
 
 def _mgmt_ip(interfaces: list[dict]) -> str:
@@ -110,7 +147,7 @@ def _build_interfaces(parsed: dict, device: Device) -> list[Interface]:
             prefix_length=iface.get("prefix_length"),
             admin_status=iface.get("admin_status", "up"),
             oper_status="up" if iface.get("admin_status", "up") == "up" else "down",
-            vlan_mode=iface.get("vlan_mode", "none"),
+            vlan_mode=iface.get("vlan_mode") or "none",
             vlan_id=iface.get("vlan_id"),
             trunk_vlans=iface.get("trunk_vlans", []),
             native_vlan=iface.get("native_vlan"),
@@ -406,7 +443,7 @@ async def ingest_stream(folder_path: str, wipe: bool = False):
         for path in config_files:
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
-                parsed = parse_ios_running_config(text, path)
+                parsed = _dispatch_parser(text, path)
                 hostname = parsed["hostname"]
 
                 device = _build_device(parsed)
@@ -512,3 +549,115 @@ async def ingest_stream(folder_path: str, wipe: bool = False):
             "Connection": "keep-alive",
         },
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Single-file upload endpoint
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/upload")
+async def ingest_upload(
+    file: UploadFile = File(...),
+    vendor: Optional[str] = Form(None),
+):
+    """
+    Upload a single network config file and index it into Elasticsearch.
+
+    Form fields:
+      file   — the config file
+      vendor — optional hint: "cisco" | "juniper" | "huawei" (auto-detected if omitted)
+
+    Returns a JSON summary including detected hostname, vendor, POP, role,
+    and counts of indexed interfaces and ACLs.
+    """
+    content = await file.read()
+    try:
+        text = content.decode("utf-8", errors="replace")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Cannot decode file: {exc}")
+
+    source_path = Path(file.filename or "upload.txt")
+
+    try:
+        parsed = _dispatch_parser(text, source_path, vendor_hint=vendor or "")
+    except Exception as exc:
+        log.exception("Failed to parse uploaded file %s", file.filename)
+        raise HTTPException(status_code=422, detail=f"Parse error: {exc}")
+
+    hostname = parsed["hostname"]
+
+    # Build model objects
+    device = _build_device(parsed)
+    interfaces = _build_interfaces(parsed, device)
+    acls = _build_acls(parsed, device)
+
+    # Index into Elasticsearch
+    es = get_es()
+    bootstrap_indices()
+    _bulk_index(es, IDX_DEVICES, [device])
+    _bulk_index(es, IDX_INTERFACES, interfaces)
+    _bulk_index(es, IDX_ACLS, acls)
+
+    return {
+        "status": "ok",
+        "hostname": hostname,
+        "vendor": parsed["vendor"],
+        "os": parsed["os"],
+        "device_type": parsed.get("device_type", "switch"),
+        "pop": parsed.get("pop"),
+        "role": parsed.get("role"),
+        "interfaces": len(interfaces),
+        "acls": len(acls),
+        "bgp_peers": len(parsed.get("bgp_peers", [])),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POP management endpoints
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/pops")
+def list_pops():
+    """Return the sorted list of unique POP codes currently in the device index."""
+    es = get_es()
+    try:
+        resp = es.search(
+            index=IDX_DEVICES,
+            body={
+                "size": 0,
+                "aggs": {
+                    "pops": {
+                        "terms": {"field": "pop", "size": 200, "missing": "__none__"}
+                    }
+                },
+            },
+        )
+        buckets = resp["aggregations"]["pops"]["buckets"]
+        pops = sorted(
+            b["key"] for b in buckets if b["key"] != "__none__"
+        )
+        return pops
+    except Exception as exc:
+        log.warning("Failed to list POPs: %s", exc)
+        return []
+
+
+@router.post("/pops/assign")
+def assign_pop(device_name: str, pop: str):
+    """
+    Assign or reassign the POP for a single device.
+    Updates the device document in-place (no re-ingest needed).
+    """
+    es = get_es()
+    device_id = _id(f"device.{device_name}")
+    try:
+        es.update(
+            index=IDX_DEVICES,
+            id=device_id,
+            body={"doc": {"pop": pop.upper()}},
+            refresh=True,
+        )
+        return {"status": "ok", "device": device_name, "pop": pop.upper()}
+    except Exception as exc:
+        log.error("Failed to assign POP %s to %s: %s", pop, device_name, exc)
+        raise HTTPException(status_code=500, detail=str(exc))

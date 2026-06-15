@@ -1,15 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <!-- chassis rectangle -->
-  <rect x="6" y="22" width="52" height="20" rx="3" stroke="white" stroke-width="2.5" fill="none"/>
-  <!-- port slots (6) -->
-  <rect x="12" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
-  <rect x="21" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
-  <rect x="30" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
-  <rect x="39" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
-  <rect x="48" y="28" width="5" height="8" rx="1" stroke="white" stroke-width="1.5" fill="none"/>
-  <!-- uplink arrows -->
-  <line x1="20" y1="22" x2="20" y2="14" stroke="white" stroke-width="2"/>
-  <polyline points="16,18 20,14 24,18" stroke="white" stroke-width="2" fill="none" stroke-linejoin="round"/>
-  <line x1="44" y1="42" x2="44" y2="50" stroke="white" stroke-width="2"/>
-  <polyline points="40,46 44,50 48,46" stroke="white" stroke-width="2" fill="none" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="chassis" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#4a90c8"/>
+      <stop offset="100%" stop-color="#0c3d6b"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#3a7ab8"/>
+      <stop offset="100%" stop-color="#0a3360"/>
+    </linearGradient>
+  </defs>
+  <!-- Uplink arrows -->
+  <line x1="22" y1="19" x2="22" y2="9"  stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="22,4 18.5,11 25.5,11" fill="white"/>
+  <line x1="42" y1="19" x2="42" y2="9"  stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="42,4 38.5,11 45.5,11" fill="white"/>
+  <!-- Drop shadow -->
+  <rect x="9" y="25" width="48" height="22" rx="3" fill="black" opacity="0.3"/>
+  <!-- Chassis body -->
+  <rect x="8" y="21" width="48" height="22" rx="3" fill="url(#chassis)" stroke="#052550" stroke-width="1.5"/>
+  <!-- Top-edge highlight (3D depth) -->
+  <rect x="8" y="21" width="48" height="4" rx="3" fill="white" opacity="0.22"/>
+  <!-- Panel recess -->
+  <rect x="11" y="25" width="42" height="15" rx="2" fill="url(#panel)"/>
+  <!-- Port sockets — 5 ports -->
+  <rect x="13" y="28" width="6" height="6" rx="1" fill="#0d1e35" stroke="#6ec0ff" stroke-width="1"/>
+  <rect x="21" y="28" width="6" height="6" rx="1" fill="#0d1e35" stroke="#6ec0ff" stroke-width="1"/>
+  <rect x="29" y="28" width="6" height="6" rx="1" fill="#0d1e35" stroke="#6ec0ff" stroke-width="1"/>
+  <rect x="37" y="28" width="6" height="6" rx="1" fill="#0d1e35" stroke="#6ec0ff" stroke-width="1"/>
+  <rect x="45" y="28" width="6" height="6" rx="1" fill="#0d1e35" stroke="#6ec0ff" stroke-width="1"/>
+  <!-- Link LEDs above each port -->
+  <circle cx="16" cy="27" r="1.5" fill="#00e676"/>
+  <circle cx="24" cy="27" r="1.5" fill="#00e676"/>
+  <circle cx="32" cy="27" r="1.5" fill="#ffaa00"/>
+  <circle cx="40" cy="27" r="1.5" fill="#00e676"/>
+  <circle cx="48" cy="27" r="1.5" fill="#00e676"/>
 </svg>
