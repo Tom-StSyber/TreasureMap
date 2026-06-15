@@ -4,7 +4,7 @@
 
 TreasureMap ingests running-configuration files from network devices, parses them into a structured graph, stores the data in Elasticsearch, and renders an interactive topology diagram in the browser. It detects BGP peers, shared /30 subnets, interface-description cross-links, VLANs, and ACLs — building a complete picture of your network with no agents, no SNMP, and no proprietary collectors.
 
-![TreasureMap topology overview](https://github.com/user-attachments/assets/306f6ea8-0adb-481f-bc9b-d0fcc1aaf4be)
+![TreasureMap topology overview](https://github.com/user-attachments/assets/b36db7f3-28ef-4853-98c1-fd1fd5694651)
 
 ---
 
