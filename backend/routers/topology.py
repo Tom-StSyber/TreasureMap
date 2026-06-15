@@ -43,23 +43,53 @@ def get_topology():
     # Map device_name → device_type for node icons
     dev_type_map = {d["name"]: d["device_type"] for d in devices}
 
-    nodes = [
+    # Collect unique POP codes to build compound parent nodes
+    pop_set: set[str] = set()
+    for d in devices:
+        pop = d.get("pop")
+        if pop:
+            pop_set.add(pop)
+
+    # POP compound (parent) nodes — rendered as labelled bounding boxes
+    pop_nodes = [
+        {
+            "data": {
+                "id": f"pop-{pop}",
+                "label": pop,
+                "is_pop": True,
+            },
+            "classes": "node-pop",
+        }
+        for pop in sorted(pop_set)
+    ]
+
+    # Device nodes — assign parent if the device has a POP
+    device_nodes = [
         {
             "data": {
                 "id": d["name"],
                 "label": d["name"],
                 "device_type": d["device_type"],
                 "vendor": d["vendor"],
-                "model": d["model"],
+                "model": d.get("model", ""),
                 "management_ip": d["management_ip"],
                 "os": d["os"],
                 "location": d.get("location", ""),
                 "tags": d.get("tags", []),
+                "pop": d.get("pop"),
+                "role": d.get("role"),
+                # Set Cytoscape parent for compound grouping
+                **({"parent": f"pop-{d['pop']}"} if d.get("pop") else {}),
             },
-            "classes": f"node-{d['device_type']}",
+            "classes": " ".join(filter(None, [
+                f"node-{d['device_type']}",
+                f"role-{d['role']}" if d.get("role") else None,
+            ])),
         }
         for d in devices
     ]
+
+    nodes = pop_nodes + device_nodes
 
     edges = [
         {

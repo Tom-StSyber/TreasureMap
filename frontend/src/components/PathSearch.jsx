@@ -9,7 +9,7 @@
  *
  * Then calls POST /pathfind and renders the per-hop results.
  */
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { api } from '../api/client.js'
 
 const S = {
@@ -115,7 +115,7 @@ function SuggestInput({ value, onChange, placeholder, id }) {
   )
 }
 
-export default function PathSearch({ onResult, onClear }) {
+export default function PathSearch({ onResult, onClear, prefillSource }) {
   const [src, setSrc]       = useState('')
   const [dst, setDst]       = useState('')
   const [proto, setProto]   = useState('')
@@ -124,6 +124,16 @@ export default function PathSearch({ onResult, onClear }) {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]   = useState(null)
+
+  // Pre-fill source when triggered by right-click context menu
+  useEffect(() => {
+    if (prefillSource) {
+      setSrc(prefillSource)
+      setResult(null)
+      setError(null)
+      onClear?.()
+    }
+  }, [prefillSource]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = useCallback(async (e) => {
     e.preventDefault()

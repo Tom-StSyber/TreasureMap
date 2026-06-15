@@ -38,6 +38,8 @@ MAPPINGS = {
                 "device_type":   {"type": "keyword"},
                 "location":      {"type": "keyword"},
                 "tags":          {"type": "keyword"},
+                "pop":           {"type": "keyword"},
+                "role":          {"type": "keyword"},
             }
         }
     },

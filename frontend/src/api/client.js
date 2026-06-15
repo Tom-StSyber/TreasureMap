@@ -28,4 +28,9 @@ export const api = {
   deviceConns:   (name)      => request(`/devices/${encodeURIComponent(name)}/connections`),
   pathfind:      (req)       => request('/pathfind', { method: 'POST', body: JSON.stringify(req) }),
   searchNodes:   (q)         => request(`/pathfind/search?q=${encodeURIComponent(q)}`),
+  pops:          ()          => request('/ingest/pops'),
+  assignPop:     (device, pop) => request(
+    `/ingest/pops/assign?device_name=${encodeURIComponent(device)}&pop=${encodeURIComponent(pop)}`,
+    { method: 'POST' }
+  ),
 }

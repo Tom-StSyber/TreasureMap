@@ -12,12 +12,13 @@
  *   └─────────────┴───────────────────────┴───────────────┘
  */
 import { useState, useEffect, useCallback } from 'react'
-import TopologyGraph from './components/TopologyGraph.jsx'
-import IngestModal   from './components/IngestModal.jsx'
-import TextualView   from './components/TextualView.jsx'
-import PathSearch    from './components/PathSearch.jsx'
-import DeviceDetails from './components/DeviceDetails.jsx'
-import { api }       from './api/client.js'
+import TopologyGraph   from './components/TopologyGraph.jsx'
+import IngestModal     from './components/IngestModal.jsx'
+import TextualView     from './components/TextualView.jsx'
+import PathSearch      from './components/PathSearch.jsx'
+import DeviceDetails   from './components/DeviceDetails.jsx'
+import PopAssignModal  from './components/PopAssignModal.jsx'
+import { api }         from './api/client.js'
 
 // ─── Layout constants ─────────────────────────────────────────────
 const LEFT_W  = 340
@@ -96,7 +97,9 @@ export default function App() {
   const [pathResult,  setPathResult]  = useState(null)
   const [loading,     setLoading]     = useState(false)
   const [esStatus,    setEsStatus]    = useState('checking')
-  const [showIngest,  setShowIngest]  = useState(false)
+  const [showIngest,    setShowIngest]    = useState(false)
+  const [popModalNode,  setPopModalNode]  = useState(null)  // node data for POP assign modal
+  const [pathPrefill,   setPathPrefill]   = useState(null)  // device name to prefill in PathSearch
 
   // Flatten edge classes into data for DeviceDetails
   const handleEdgeClick = useCallback((data) => {
@@ -150,7 +153,7 @@ export default function App() {
       <header style={S.header}>
         <div>
           <span style={S.logo}>🗺 TreasureMap</span>
-          <span style={S.logoSub}>Network Topology</span>
+          <span style={S.logoSub}>Network Topology Intelligence</span>
         </div>
 
         <div style={S.legend}>
@@ -194,6 +197,7 @@ export default function App() {
               <PathSearch
                 onResult={(r) => { setPathResult(r); }}
                 onClear={() => setPathResult(null)}
+                prefillSource={pathPrefill}
               />
             )}
           </div>
@@ -215,6 +219,11 @@ export default function App() {
             pathResult={pathResult}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
+            onPathFrom={(deviceName) => {
+              setPathPrefill(deviceName)
+              setLeftTab('pathfind')
+            }}
+            onAssignPop={(nodeData) => setPopModalNode(nodeData)}
           />
         </main>
 
@@ -250,6 +259,18 @@ export default function App() {
           onSuccess={() => {
             setShowIngest(false)
             load()
+          }}
+        />
+      )}
+
+      {popModalNode && (
+        <PopAssignModal
+          deviceName={popModalNode.label}
+          currentPop={popModalNode.pop}
+          onClose={() => setPopModalNode(null)}
+          onSuccess={() => {
+            setPopModalNode(null)
+            load()  // reload topology to show updated POP grouping
           }}
         />
       )}
