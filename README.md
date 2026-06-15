@@ -42,7 +42,7 @@ Wait ~30 seconds for Elasticsearch to initialise, then open:
 
 ---
 
-## From Nothing to Useful — Step by Step
+## From Zero to Useful — Step by Step
 
 ### 1  Clone and start
 
