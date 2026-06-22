@@ -1,12 +1,7 @@
-# ── TreasureMap — Docker Compose (portable, no hardcoded paths) ────────────────
-# Usage (from the TreasureMap directory):
-#   docker compose up -d --build
-#
-# Services:
-#   elasticsearch  → http://localhost:9200
-#   api            → http://localhost:8000  (FastAPI + uvicorn)
-#   frontend       → http://localhost:3000  (Nginx serving built React app)
-#   kibana         → http://localhost:5601  (optional — ES browser)
+# TreasureMap — Docker Compose
+# Install location: D:\Home-Lab\TreasureMap
+# Run from that directory: docker compose up -d --build
+version: "3.8"
 
 services:
 
@@ -15,7 +10,7 @@ services:
     container_name: tm-elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
+      - xpack.security.enabled=false        # no auth during dev
       - xpack.security.http.ssl.enabled=false
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
     ports:
@@ -49,16 +44,15 @@ services:
     container_name: tm-api
     environment:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:3000
     ports:
       - "8000:8000"
     depends_on:
       elasticsearch:
         condition: service_healthy
-    volumes:
-      - ./backend:/app        # live-reload in dev
-      - ./data:/external-data # network config files (batfish, samples, etc.)
     restart: unless-stopped
+    volumes:
+      - ./backend:/app                          # live-reload for dev
 
   frontend:
     build:
