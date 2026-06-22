@@ -100,12 +100,19 @@ function LegendItem({ color, label, dashed, thick, shape }) {
 
 // ─── Ingest panel ─────────────────────────────────────────────────
 function IngestPanel({ onIngested, onClose }) {
+  const [mode,     setMode]     = useState('single')   // 'single' | 'bulk'
+  // Single-file mode
   const [file,     setFile]     = useState(null)
   const [hostname, setHostname] = useState('')
   const [vendor,   setVendor]   = useState('auto')
   const [status,   setStatus]   = useState(null)   // null | 'loading' | {ok} | {error}
+  // Bulk mode
+  const [bulkFiles,    setBulkFiles]    = useState([])   // File[]
+  const [bulkProgress, setBulkProgress] = useState(null) // null | {done,total,results:[]}
   const fileRef = useRef()
+  const folderRef = useRef()
 
+  // ── Single file upload ──────────────────────────────────────────
   async function handleUpload() {
     if (!file) return
     setStatus('loading')
@@ -124,68 +131,218 @@ function IngestPanel({ onIngested, onClose }) {
     }
   }
 
+  // ── Bulk upload (folder or multi-file) ─────────────────────────
+  async function handleBulkUpload() {
+    if (!bulkFiles.length) return
+    const accepted = ['.txt', '.conf', '.cfg', '.log']
+    const toUpload = bulkFiles.filter(f =>
+      accepted.some(ext => f.name.toLowerCase().endsWith(ext))
+    )
+    if (!toUpload.length) {
+      setBulkProgress({ done: 0, total: 0, results: [], error: 'No supported files found (.txt .conf .cfg .log)' })
+      return
+    }
+
+    const results = []
+    setBulkProgress({ done: 0, total: toUpload.length, results })
+
+    for (let i = 0; i < toUpload.length; i++) {
+      const f = toUpload[i]
+      const form = new FormData()
+      form.append('file', f)
+      form.append('hostname', 'unknown')   // auto-detect from content
+      form.append('vendor', 'auto')
+      try {
+        const res = await fetch('/api/ingest/config', { method: 'POST', body: form })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.detail || res.statusText)
+        results.push({ name: f.name, ok: true, device: json.device, vendor: json.vendor })
+      } catch (e) {
+        results.push({ name: f.name, ok: false, error: e.message })
+      }
+      setBulkProgress({ done: i + 1, total: toUpload.length, results: [...results] })
+    }
+
+    onIngested?.()
+  }
+
   const panelStyle = {
     position: 'absolute', top: 10, right: 10, zIndex: 1000,
     background: '#1e293b', border: '1px solid #334155', borderRadius: 10,
-    padding: 20, width: 320, color: '#e2e8f0', fontSize: 13,
+    padding: 20, width: 360, color: '#e2e8f0', fontSize: 13,
     boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+    maxHeight: '80vh', overflowY: 'auto',
   }
   const inp = {
     width: '100%', boxSizing: 'border-box', background: '#0f172a',
     border: '1px solid #334155', borderRadius: 6, padding: '7px 10px',
     color: '#f1f5f9', fontSize: 12, marginBottom: 10, outline: 'none',
   }
+  const tabBtn = (active) => ({
+    flex: 1, padding: '6px 0', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+    borderRadius: 6,
+    background: active ? '#1d4ed8' : '#0f172a',
+    color: active ? '#fff' : '#64748b',
+  })
+
+  const isBulkRunning = bulkProgress && bulkProgress.done < bulkProgress.total
+
   return (
     <div style={panelStyle}>
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
-        <span style={{ fontWeight: 700, fontSize: 14 }}>📂 Ingest Config File</span>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>📂 Ingest Config Files</span>
         <button onClick={onClose}
           style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 16 }}>✕</button>
       </div>
 
-      <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>Config file</label>
-      <input type="file" ref={fileRef} accept=".txt,.conf,.cfg,.log"
-        onChange={e => setFile(e.target.files[0])} style={{ ...inp, padding: '4px 6px' }} />
+      {/* Mode tabs */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, background: '#0f172a', padding: 4, borderRadius: 8 }}>
+        <button style={tabBtn(mode === 'single')} onClick={() => { setMode('single'); setStatus(null) }}>
+          Single File
+        </button>
+        <button style={tabBtn(mode === 'bulk')} onClick={() => { setMode('bulk'); setBulkProgress(null) }}>
+          Folder / Multiple
+        </button>
+      </div>
 
-      <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>
-        Hostname override <span style={{ color: '#475569' }}>(leave blank to auto-detect)</span>
-      </label>
-      <input style={inp} type="text" placeholder="eqx-nyc-rtr-01"
-        value={hostname} onChange={e => setHostname(e.target.value)} />
+      {/* ── Single file mode ── */}
+      {mode === 'single' && (
+        <>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>Config file</label>
+          <input type="file" ref={fileRef} accept=".txt,.conf,.cfg,.log"
+            onChange={e => { setFile(e.target.files[0]); setStatus(null) }}
+            style={{ ...inp, padding: '4px 6px' }} />
 
-      <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>Vendor</label>
-      <select style={inp} value={vendor} onChange={e => setVendor(e.target.value)}>
-        <option value="auto">Auto-detect</option>
-        <option value="cisco">Cisco IOS / NX-OS</option>
-        <option value="juniper">Juniper JunOS</option>
-        <option value="huawei">Huawei VRP</option>
-      </select>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>
+            Hostname override <span style={{ color: '#475569' }}>(leave blank to auto-detect)</span>
+          </label>
+          <input style={inp} type="text" placeholder="eqx-nyc-rtr-01"
+            value={hostname} onChange={e => setHostname(e.target.value)} />
 
-      {status === 'loading' && (
-        <div style={{ color: '#60a5fa', marginBottom: 10, fontSize: 12 }}>⟳ Parsing and indexing…</div>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>Vendor</label>
+          <select style={inp} value={vendor} onChange={e => setVendor(e.target.value)}>
+            <option value="auto">Auto-detect</option>
+            <option value="cisco">Cisco IOS / NX-OS</option>
+            <option value="juniper">Juniper JunOS</option>
+            <option value="huawei">Huawei VRP</option>
+          </select>
+
+          {status === 'loading' && (
+            <div style={{ color: '#60a5fa', marginBottom: 10, fontSize: 12 }}>⟳ Parsing and indexing…</div>
+          )}
+          {status?.ok && (
+            <div style={{ color: '#4ade80', marginBottom: 10, fontSize: 12 }}>
+              ✓ {status.data.device} ({status.data.vendor}) ingested
+              — POP: {status.data.pop || 'undetected'}, {status.data.interfaces} interfaces
+            </div>
+          )}
+          {status?.error && (
+            <div style={{ color: '#f87171', marginBottom: 10, fontSize: 12 }}>⚠ {status.error}</div>
+          )}
+
+          <button
+            style={{
+              width: '100%', padding: '9px 0', borderRadius: 6, border: 'none',
+              background: !file || status === 'loading' ? '#1e293b' : '#1d4ed8',
+              color: '#f1f5f9', fontWeight: 700, cursor: !file ? 'not-allowed' : 'pointer',
+              opacity: !file || status === 'loading' ? 0.5 : 1,
+            }}
+            onClick={handleUpload}
+            disabled={!file || status === 'loading'}
+          >
+            Upload & Parse
+          </button>
+        </>
       )}
-      {status?.ok && (
-        <div style={{ color: '#4ade80', marginBottom: 10, fontSize: 12 }}>
-          ✓ {status.data.device} ({status.data.vendor}) ingested
-          — POP: {status.data.pop || 'undetected'}, {status.data.interfaces} interfaces
-        </div>
-      )}
-      {status?.error && (
-        <div style={{ color: '#f87171', marginBottom: 10, fontSize: 12 }}>⚠ {status.error}</div>
-      )}
 
-      <button
-        style={{
-          width: '100%', padding: '9px 0', borderRadius: 6, border: 'none',
-          background: !file || status === 'loading' ? '#1e293b' : '#1d4ed8',
-          color: '#f1f5f9', fontWeight: 700, cursor: !file ? 'not-allowed' : 'pointer',
-          opacity: !file || status === 'loading' ? 0.5 : 1,
-        }}
-        onClick={handleUpload}
-        disabled={!file || status === 'loading'}
-      >
-        Upload & Parse
-      </button>
+      {/* ── Bulk mode ── */}
+      {mode === 'bulk' && (
+        <>
+          <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10 }}>
+            Select a folder or multiple files. Vendor and hostname are auto-detected
+            from each file's content and name.
+          </div>
+
+          {/* Folder picker */}
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>Select folder</label>
+          <input
+            type="file"
+            ref={folderRef}
+            // webkitdirectory lets the browser show a folder picker
+            // and exposes all files within it
+            webkitdirectory=""
+            directory=""
+            multiple
+            style={{ ...inp, padding: '4px 6px' }}
+            onChange={e => { setBulkFiles(Array.from(e.target.files)); setBulkProgress(null) }}
+          />
+
+          {/* Or multi-file picker */}
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>
+            — or select multiple files individually —
+          </label>
+          <input
+            type="file"
+            multiple
+            accept=".txt,.conf,.cfg,.log"
+            style={{ ...inp, padding: '4px 6px' }}
+            onChange={e => { setBulkFiles(Array.from(e.target.files)); setBulkProgress(null) }}
+          />
+
+          {bulkFiles.length > 0 && !bulkProgress && (
+            <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 10 }}>
+              {bulkFiles.length} file{bulkFiles.length !== 1 ? 's' : ''} selected
+            </div>
+          )}
+
+          {/* Progress */}
+          {bulkProgress && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: '#60a5fa', marginBottom: 6 }}>
+                {bulkProgress.done < bulkProgress.total
+                  ? `⟳ Processing ${bulkProgress.done + 1} of ${bulkProgress.total}…`
+                  : `✓ Done — ${bulkProgress.done} file${bulkProgress.done !== 1 ? 's' : ''} processed`}
+              </div>
+              {/* Progress bar */}
+              <div style={{ background: '#0f172a', borderRadius: 4, height: 6, marginBottom: 8 }}>
+                <div style={{
+                  background: '#1d4ed8', borderRadius: 4, height: 6,
+                  width: `${Math.round((bulkProgress.done / bulkProgress.total) * 100)}%`,
+                  transition: 'width 0.2s',
+                }} />
+              </div>
+              {/* Per-file results (scrollable) */}
+              <div style={{ maxHeight: 180, overflowY: 'auto', fontSize: 11 }}>
+                {bulkProgress.results.map((r, i) => (
+                  <div key={i} style={{ color: r.ok ? '#4ade80' : '#f87171', marginBottom: 2 }}>
+                    {r.ok
+                      ? `✓ ${r.name} → ${r.device} (${r.vendor})`
+                      : `✗ ${r.name}: ${r.error}`}
+                  </div>
+                ))}
+              </div>
+              {bulkProgress.error && (
+                <div style={{ color: '#f87171', fontSize: 12, marginTop: 6 }}>{bulkProgress.error}</div>
+              )}
+            </div>
+          )}
+
+          <button
+            style={{
+              width: '100%', padding: '9px 0', borderRadius: 6, border: 'none',
+              background: !bulkFiles.length || isBulkRunning ? '#1e293b' : '#1d4ed8',
+              color: '#f1f5f9', fontWeight: 700,
+              cursor: !bulkFiles.length || isBulkRunning ? 'not-allowed' : 'pointer',
+              opacity: !bulkFiles.length || isBulkRunning ? 0.5 : 1,
+            }}
+            onClick={handleBulkUpload}
+            disabled={!bulkFiles.length || isBulkRunning}
+          >
+            {isBulkRunning ? 'Uploading…' : `Upload ${bulkFiles.length || ''} Files`}
+          </button>
+        </>
+      )}
     </div>
   )
 }
