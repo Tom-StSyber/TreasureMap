@@ -28,7 +28,7 @@
 set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-REPO_URL="https://github.com/YOUR_ORG/TreasureMap.git"   # <-- set this
+REPO_URL="https://github.com/Tom-StSyber/TreasureMap.git"
 INSTALL_DIR="${HOME}/TreasureMap"
 NODE_MAJOR=20
 
@@ -168,15 +168,11 @@ section "Installing frontend npm dependencies"
 # package.json is at frontend/package.json — there is NO root-level package.json.
 cd "$INSTALL_DIR/frontend"
 
-# npm ci uses the lockfile for exact reproducible installs.
-# If there is no package-lock.json yet (first clone), fall back to npm install.
-if [[ -f "package-lock.json" ]]; then
-    npm ci --prefer-offline 2>/dev/null || npm ci
-    info "npm ci completed (lockfile-based install)."
-else
-    npm install
-    info "npm install completed. Committing package-lock.json to the repo is recommended."
-fi
+# Always delete any existing lockfile and regenerate from the pinned package.json.
+# This prevents stale lockfile conflicts when package versions have been updated.
+rm -f package-lock.json
+npm install
+info "npm install completed (dependencies pinned to exact versions in package.json)."
 
 cd "$INSTALL_DIR"
 
