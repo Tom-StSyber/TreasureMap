@@ -1,43 +1,31 @@
 """
-parsers/huawei.py — Huawei VRP (Versatile Routing Platform) configuration parser.
+TreasureMap — Huawei VRP configuration parser.
 
-Supports VRP V2/V5/V8 running configurations.
+Supports Huawei VRP (Versatile Routing Platform) format used on:
+  CE series (data-center switches), NE series (routers), S series (campus switches)
 
-Detection heuristic
--------------------
-  File contains "sysname " directive AND at least one "interface " block.
+VRP syntax is similar to IOS but uses different keywords:
+  • "interface GigabitEthernet0/0/0"
+  • "ip address 10.0.0.1 255.255.255.0"
+  • "acl number 3000" / "rule 5 permit ip source ..."
+  • "vlan batch 10 20 30"
+  • "port trunk allow-pass vlan 10 20"
+  • "traffic-filter inbound acl 3000"
 
-Supported constructs
---------------------
-  sysname <hostname>
-  interface <name>
-    description <text>
-    ip address <ip> <mask>       (dotted-decimal mask)
-    undo shutdown               (interface is admin-up)
-    shutdown                    (interface is admin-down)
-    port link-type access|trunk
-    port default vlan <N>       (access VLAN)
-    port trunk allow-pass vlan <N> [to <M>] [<N> ...]
-    ip access-group <name> inbound|outbound
-    traffic-filter inbound|outbound acl <name|number>
+Returns a dict:
+  {
+    "device":     { name, hostname, vendor, model, os, management_ip, device_type, tags },
+    "interfaces": [ {name, description, ip_address, prefix_length, admin_status,
+                     vlan_mode, vlan_id, trunk_vlans, acl_in, acl_out} ],
+    "acls":       [ {name, acl_type, rules:[...]} ],
+  }
 """
 from __future__ import annotations
-
-import ipaddress
 import re
-from pathlib import Path
+import logging
 from typing import Optional
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Format detection
-# ──────────────────────────────────────────────────────────────────────────────
-
-def is_huawei_config(text: str) -> bool:
-    has_sysname = bool(re.search(r"^\s*sysname\s+\S+", text, re.MULTILINE))
-    has_iface = bool(re.search(r"^\s*interface\s+\S+", text, re.MULTILINE))
-    return has_sysname and has_iface
-
+log = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -45,260 +33,374 @@ def is_huawei_config(text: str) -> bool:
 
 def _mask_to_prefix(mask: str) -> Optional[int]:
     try:
-        return ipaddress.IPv4Network(f"0.0.0.0/{mask}", strict=False).prefixlen
-    except ValueError:
+        return sum(bin(int(o)).count("1") for o in mask.split("."))
+    except Exception:
         return None
 
 
-def _empty_iface(name: str) -> dict:
-    return {
-        "name": name,
-        "description": None,
-        "ip_address": None,
-        "prefix_length": None,
-        "admin_status": "up",   # Huawei interfaces are up by default
-        "vlan_mode": "none",
-        "vlan_id": None,
-        "trunk_vlans": [],
-        "native_vlan": None,
-        "acl_in": None,
-        "acl_out": None,
-    }
+def _pick_mgmt_ip(interfaces: dict) -> Optional[str]:
+    # Loopback first
+    for name, iface in interfaces.items():
+        if re.match(r"loopback", name, re.I) and iface.get("ip_address"):
+            return iface["ip_address"]
+    # MEth / management
+    for name, iface in interfaces.items():
+        if re.match(r"(meth|management|m-ethernet|eth-trunk\s*0$)", name, re.I) and iface.get("ip_address"):
+            return iface["ip_address"]
+    # First IP
+    for iface in interfaces.values():
+        if iface.get("ip_address"):
+            return iface["ip_address"]
+    return None
 
 
-def _parse_trunk_vlan_list(raw: str) -> list[int]:
-    """
-    Parse Huawei trunk vlan list: "10 to 20 30 40 to 50"
-    Returns list of VLAN IDs.
-    """
-    vlans: list[int] = []
-    tokens = raw.split()
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok.lower() == "to" and i > 0 and i + 1 < len(tokens):
-            # range: prev_token to next_token
-            try:
-                lo = int(tokens[i - 1])
-                hi = int(tokens[i + 1])
-                # Remove the last-added lo if already added individually
-                if vlans and vlans[-1] == lo:
-                    vlans.pop()
-                vlans.extend(range(lo, hi + 1))
-                i += 2
-            except (ValueError, IndexError):
-                i += 1
-        elif tok.isdigit():
-            vlans.append(int(tok))
-            i += 1
-        elif "-" in tok:
-            parts = tok.split("-")
-            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                vlans.extend(range(int(parts[0]), int(parts[1]) + 1))
-            i += 1
-        else:
-            i += 1
-    return vlans
+def _iface_ensure(interfaces: dict, name: str):
+    if name not in interfaces:
+        interfaces[name] = {
+            "name": name, "description": None, "ip_address": None,
+            "prefix_length": None, "mac_address": None,
+            "admin_status": "up", "oper_status": "up",
+            "vlan_mode": "none", "vlan_id": None, "trunk_vlans": [],
+            "native_vlan": None, "acl_in": None, "acl_out": None,
+            "firewall_policy": None, "speed_mbps": None, "duplex": None,
+        }
+
+
+def _guess_device_type(hostname: str, model: str, interfaces: dict) -> str:
+    h = (hostname + " " + model).lower()
+    if any(k in h for k in ("firewall", "usg", "secpath")):
+        return "firewall"
+    if any(k in h for k in ("ce6", "ce7", "ce8", "s5", "s6", "s7", "quidway", "switch", "sw")):
+        return "switch"
+    if any(k in h for k in ("ne40", "ne80", "cr", "asr", "router", "pe", "gw", "edge", "core")):
+        return "router"
+    # count routed interfaces
+    routed = sum(1 for i in interfaces.values() if i.get("ip_address"))
+    return "router" if routed >= 2 else "switch"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Main parser
 # ──────────────────────────────────────────────────────────────────────────────
 
-def parse_huawei_config(text: str, source_path: Path) -> dict:
+def parse_huawei(raw: str, hostname: str = "unknown") -> dict:
     """
-    Parse a Huawei VRP running configuration.
+    Parse a Huawei VRP config string.
 
-    Returns the same schema as parsers.ios_config.parse_ios_running_config:
-    {hostname, vendor, os, device_type, version, model, interfaces, acls, bgp_peers, source_file}
+    Args:
+        raw:      Full text of the config file.
+        hostname: Override hostname if not detectable from config.
+
+    Returns dict with keys: device, interfaces, acls.
     """
-    result = {
-        "hostname": source_path.stem,
-        "vendor": "Huawei",
-        "os": "VRP",
-        "device_type": "switch",
-        "version": "",
-        "model": "",
-        "interfaces": [],
-        "acls": [],
-        "bgp_peers": [],
-        "source_file": source_path.name,
-    }
+    interfaces: dict[str, dict] = {}
+    acls: dict[str, dict] = {}
 
-    lines = text.splitlines()
-    n = len(lines)
+    current_iface: Optional[str] = None
+    current_acl:   Optional[str] = None
+    current_acl_seq_base: int = 0
+    model = "Huawei VRP"
+
+    lines = raw.splitlines()
     i = 0
-
-    bgp_peers: list[dict] = []
-    local_as: Optional[int] = None
-
-    while i < n:
-        raw = lines[i]
-        line = raw.strip()
-
-        # ── sysname ───────────────────────────────────────────────────────────
-        m = re.match(r"^sysname\s+(\S+)", line)
-        if m:
-            result["hostname"] = m.group(1)
-            i += 1
-            continue
-
-        # ── version ───────────────────────────────────────────────────────────
-        m = re.match(r"^(?:Huawei Versatile Routing Platform )?Software.*Version\s+([\w.()]+)", line, re.IGNORECASE)
-        if m:
-            result["version"] = m.group(1)
-            i += 1
-            continue
-
-        m = re.match(r"^version\s+([\w.()]+)", line, re.IGNORECASE)
-        if m:
-            result["version"] = m.group(1)
-            i += 1
-            continue
-
-        # ── interface block ───────────────────────────────────────────────────
-        iface_m = re.match(r"^interface\s+(\S+)", line)
-        if iface_m:
-            iface_name = iface_m.group(1)
-            iface = _empty_iface(iface_name)
-            i += 1
-            while i < n:
-                sub_raw = lines[i]
-                # Interface block ends when next top-level statement begins
-                # (non-indented line that's not blank)
-                if sub_raw and not sub_raw[0].isspace():
-                    break
-                sub = sub_raw.strip()
-
-                if not sub or sub.startswith("#"):
-                    i += 1
-                    continue
-
-                # description
-                desc_m = re.match(r"^description\s+(.*)", sub)
-                if desc_m:
-                    iface["description"] = desc_m.group(1).strip()
-                    i += 1
-                    continue
-
-                # ip address <ip> <mask>
-                ip_m = re.match(r"^ip address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", sub)
-                if ip_m:
-                    iface["ip_address"] = ip_m.group(1)
-                    pfx = _mask_to_prefix(ip_m.group(2))
-                    iface["prefix_length"] = pfx
-                    iface["vlan_mode"] = "routed"
-                    i += 1
-                    continue
-
-                # shutdown / undo shutdown
-                if sub == "shutdown":
-                    iface["admin_status"] = "disabled"
-                    i += 1
-                    continue
-                if sub == "undo shutdown":
-                    iface["admin_status"] = "up"
-                    i += 1
-                    continue
-
-                # port link-type access|trunk
-                link_m = re.match(r"^port link-type\s+(access|trunk|hybrid)", sub)
-                if link_m:
-                    mode = link_m.group(1)
-                    if mode in ("access", "trunk"):
-                        iface["vlan_mode"] = mode
-                    i += 1
-                    continue
-
-                # port default vlan N  (access)
-                pvlan_m = re.match(r"^port default vlan\s+(\d+)", sub)
-                if pvlan_m:
-                    iface["vlan_id"] = int(pvlan_m.group(1))
-                    if iface["vlan_mode"] == "none":
-                        iface["vlan_mode"] = "access"
-                    i += 1
-                    continue
-
-                # port trunk allow-pass vlan <list>
-                trunk_m = re.match(r"^port trunk allow-pass vlan\s+(.+)", sub)
-                if trunk_m:
-                    vlans = _parse_trunk_vlan_list(trunk_m.group(1))
-                    iface["trunk_vlans"].extend(vlans)
-                    if iface["vlan_mode"] == "none":
-                        iface["vlan_mode"] = "trunk"
-                    i += 1
-                    continue
-
-                # port trunk pvid vlan N  (native VLAN on trunk)
-                native_m = re.match(r"^port trunk pvid vlan\s+(\d+)", sub)
-                if native_m:
-                    iface["native_vlan"] = int(native_m.group(1))
-                    i += 1
-                    continue
-
-                # ACL / traffic filter
-                # traffic-filter inbound acl <name|num>
-                tf_m = re.match(r"^traffic-filter\s+(inbound|outbound)\s+acl\s+(\S+)", sub)
-                if tf_m:
-                    direction = tf_m.group(1)
-                    acl_name = tf_m.group(2)
-                    if direction == "inbound":
-                        iface["acl_in"] = acl_name
-                    else:
-                        iface["acl_out"] = acl_name
-                    i += 1
-                    continue
-
-                # ip access-group <name> inbound|outbound
-                ag_m = re.match(r"^ip access-group\s+(\S+)\s+(inbound|outbound)", sub)
-                if ag_m:
-                    acl_name = ag_m.group(1)
-                    direction = ag_m.group(2)
-                    if direction == "inbound":
-                        iface["acl_in"] = acl_name
-                    else:
-                        iface["acl_out"] = acl_name
-                    i += 1
-                    continue
-
-                i += 1
-
-            result["interfaces"].append(iface)
-            continue
-
-        # ── BGP ───────────────────────────────────────────────────────────────
-        bgp_m = re.match(r"^bgp\s+(\d+)", line)
-        if bgp_m:
-            local_as = int(bgp_m.group(1))
-            i += 1
-            while i < n:
-                sub_raw = lines[i]
-                if sub_raw and not sub_raw[0].isspace():
-                    break
-                sub = sub_raw.strip()
-                # peer <ip> as-number <N>
-                peer_m = re.match(r"^peer\s+(\d+\.\d+\.\d+\.\d+)\s+as-number\s+(\d+)", sub)
-                if peer_m:
-                    bgp_peers.append({
-                        "peer_ip": peer_m.group(1),
-                        "local_as": local_as,
-                        "remote_as": int(peer_m.group(2)),
-                    })
-                i += 1
-            continue
-
+    while i < len(lines):
+        raw_line = lines[i]
+        line = raw_line.strip()
         i += 1
 
-    # Determine device type
-    has_routed = any(i.get("ip_address") for i in result["interfaces"]
-                     if not re.match(r"^(LoopBack|NULL)", i["name"], re.IGNORECASE))
-    has_switch = any(i.get("vlan_mode") in ("access", "trunk") for i in result["interfaces"])
-    has_bgp = bool(bgp_peers)
+        if not line or line.startswith("!") or line.startswith("#"):
+            # Section separator — exit interface/acl context
+            if line == "#":
+                current_iface = None
+                current_acl   = None
+            continue
 
-    if (has_routed or has_bgp) and not has_switch:
-        result["device_type"] = "router"
-    elif has_switch:
-        result["device_type"] = "switch"
+        # ── System hostname ──────────────────────────────────────
+        m = re.match(r"sysname\s+(\S+)", line, re.I)
+        if m:
+            if hostname == "unknown":
+                hostname = m.group(1)
+            continue
 
-    result["bgp_peers"] = bgp_peers
-    return result
+        # ── Model from header comment ────────────────────────────
+        m = re.match(r"#\s*(?:board|device)?\s*model[:\s]+(\S+)", line, re.I)
+        if m:
+            model = m.group(1)
+            continue
+
+        # ── VLAN batch ───────────────────────────────────────────
+        # "vlan batch 10 20 30 to 40" — we just note VLANs exist; no device model impact
+        # (skip — VLANs are tracked per-interface)
+
+        # ── Interface block ──────────────────────────────────────
+        m = re.match(r"interface\s+(.+)", line, re.I)
+        if m:
+            current_iface = m.group(1).strip()
+            current_acl   = None
+            _iface_ensure(interfaces, current_iface)
+            continue
+
+        # Inside interface block
+        if current_iface:
+            _parse_iface_line(line, current_iface, interfaces, acls)
+            continue
+
+        # ── ACL number block ─────────────────────────────────────
+        m = re.match(r"acl\s+(number\s+)?(\d+)", line, re.I)
+        if m:
+            acl_num = m.group(2)
+            acl_name = f"acl-{acl_num}"
+            current_acl = acl_name
+            current_iface = None
+            acl_type = "standard" if int(acl_num) < 2000 else "extended"
+            if acl_name not in acls:
+                acls[acl_name] = {"name": acl_name, "acl_type": acl_type, "rules": []}
+            continue
+
+        # ── ACL name block ───────────────────────────────────────
+        m = re.match(r"acl\s+name\s+(\S+)", line, re.I)
+        if m:
+            acl_name = m.group(1)
+            current_acl = acl_name
+            current_iface = None
+            if acl_name not in acls:
+                acls[acl_name] = {"name": acl_name, "acl_type": "named", "rules": []}
+            continue
+
+        # Inside ACL block
+        if current_acl:
+            _parse_acl_line(line, current_acl, acls)
+            continue
+
+    # Post-process
+    mgmt_ip = _pick_mgmt_ip(interfaces)
+    device_type = _guess_device_type(hostname, model, interfaces)
+
+    log.info(
+        "Parsed Huawei VRP config for %s: %d interfaces, %d ACLs",
+        hostname, len(interfaces), len(acls)
+    )
+
+    return {
+        "device": {
+            "name": hostname,
+            "hostname": hostname,
+            "vendor": "Huawei",
+            "model": model,
+            "os": "VRP",
+            "management_ip": mgmt_ip or "0.0.0.0",
+            "device_type": device_type,
+            "tags": ["huawei", "vrp", "parsed"],
+        },
+        "interfaces": list(interfaces.values()),
+        "acls": list(acls.values()),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Interface line parser
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _parse_iface_line(line: str, iface: str, interfaces: dict, acls: dict):
+    idata = interfaces[iface]
+
+    # description
+    m = re.match(r"description\s+(.+)", line, re.I)
+    if m:
+        idata["description"] = m.group(1)
+        return
+
+    # shutdown (admin down)
+    if re.match(r"shutdown", line, re.I):
+        idata["admin_status"] = "disabled"
+        return
+
+    # undo shutdown (bring up)
+    if re.match(r"undo shutdown", line, re.I):
+        idata["admin_status"] = "up"
+        return
+
+    # ip address A.B.C.D M.M.M.M [secondary]
+    m = re.match(r"ip address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", line, re.I)
+    if m:
+        ip, mask = m.group(1), m.group(2)
+        idata["ip_address"] = ip
+        idata["prefix_length"] = _mask_to_prefix(mask)
+        idata["vlan_mode"] = "routed"
+        return
+
+    # ipv6 address — record if no v4
+    m = re.match(r"ipv6 address\s+(\S+)", line, re.I)
+    if m and not idata.get("ip_address"):
+        addr = m.group(1).split("/")[0]
+        idata["ip_address"] = addr
+        pl = m.group(1).split("/")[1] if "/" in m.group(1) else None
+        if pl:
+            idata["prefix_length"] = int(pl)
+        return
+
+    # port link-type (access/trunk/hybrid)
+    m = re.match(r"port link-type\s+(access|trunk|hybrid)", line, re.I)
+    if m:
+        mode = m.group(1).lower()
+        idata["vlan_mode"] = "trunk" if mode == "trunk" else "access"
+        return
+
+    # port default vlan (access)
+    m = re.match(r"port default vlan\s+(\d+)", line, re.I)
+    if m:
+        idata["vlan_id"] = int(m.group(1))
+        idata["vlan_mode"] = "access"
+        return
+
+    # port trunk allow-pass vlan
+    m = re.match(r"port trunk allow-pass vlan\s+(.+)", line, re.I)
+    if m:
+        vlan_str = m.group(1)
+        idata["vlan_mode"] = "trunk"
+        idata["trunk_vlans"] = _parse_vlan_list(vlan_str)
+        return
+
+    # port trunk pvid vlan (native vlan)
+    m = re.match(r"port trunk pvid vlan\s+(\d+)", line, re.I)
+    if m:
+        idata["native_vlan"] = int(m.group(1))
+        return
+
+    # traffic-filter inbound/outbound acl [number] NAME
+    m = re.match(r"traffic-filter\s+(inbound|outbound)\s+acl\s+(?:number\s+)?(\S+)", line, re.I)
+    if m:
+        direction, acl_ref = m.group(1).lower(), m.group(2)
+        acl_name = f"acl-{acl_ref}" if acl_ref.isdigit() else acl_ref
+        if direction == "inbound":
+            idata["acl_in"] = acl_name
+        else:
+            idata["acl_out"] = acl_name
+        idata["firewall_policy"] = acl_name
+        # Ensure ACL entry exists
+        if acl_name not in (acls or {}):
+            acls[acl_name] = {
+                "name": acl_name, "acl_type": "extended", "rules": []
+            }
+        return
+
+    # speed
+    m = re.match(r"speed\s+(\d+)", line, re.I)
+    if m:
+        spd = int(m.group(1))
+        # VRP uses Mb/s in speed command
+        idata["speed_mbps"] = spd
+        return
+
+    # duplex
+    m = re.match(r"duplex\s+(auto|full|half)", line, re.I)
+    if m:
+        idata["duplex"] = m.group(1).lower()
+        return
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ACL line parser
+# ──────────────────────────────────────────────────────────────────────────────
+
+_PROTO_MAP = {
+    "ip": "ip", "tcp": "tcp", "udp": "udp",
+    "icmp": "icmp", "ospf": "ospf", "igmp": "igmp",
+    "gre": "gre", "esp": "esp", "ah": "ah",
+}
+
+def _parse_acl_line(line: str, acl_name: str, acls: dict):
+    acl = acls[acl_name]
+
+    # rule [sequence] {permit|deny} {protocol} [source S M] [destination D M] [dst-port eq P]
+    m = re.match(
+        r"rule\s+(\d+)\s+(permit|deny)\s+(\S+)"
+        r"(?:\s+source\s+(\S+)\s+(\S+))?"
+        r"(?:\s+destination\s+(\S+)\s+(\S+))?"
+        r"(?:\s+destination-port\s+eq\s+(\d+))?",
+        line, re.I
+    )
+    if m:
+        seq       = int(m.group(1))
+        action    = m.group(2).lower()
+        proto     = _PROTO_MAP.get(m.group(3).lower(), m.group(3).lower())
+        src_host  = m.group(4)
+        src_wc    = m.group(5)
+        dst_host  = m.group(6)
+        dst_wc    = m.group(7)
+        dst_port  = m.group(8)
+
+        src_net = "any"
+        if src_host and src_host.lower() != "any":
+            if src_wc == "0.0.0.0":
+                src_net = f"{src_host}/32"
+            elif src_wc:
+                src_net = _wildcard_to_cidr(src_host, src_wc)
+            else:
+                src_net = src_host
+
+        dst_net = "any"
+        if dst_host and dst_host.lower() != "any":
+            if dst_wc == "0.0.0.0":
+                dst_net = f"{dst_host}/32"
+            elif dst_wc:
+                dst_net = _wildcard_to_cidr(dst_host, dst_wc)
+            else:
+                dst_net = dst_host
+
+        rule = {
+            "sequence": seq, "action": action, "protocol": proto,
+            "src_network": src_net, "dst_network": dst_net,
+        }
+        if dst_port:
+            rule["dst_port"] = int(dst_port)
+
+        acl["rules"].append(rule)
+        return
+
+    # Simple "rule N permit/deny" (standard ACL style)
+    m = re.match(r"rule\s+(\d+)\s+(permit|deny)\s+source\s+(\S+)\s+(\S+)", line, re.I)
+    if m:
+        seq, action, src_host, src_wc = int(m.group(1)), m.group(2).lower(), m.group(3), m.group(4)
+        src_net = _wildcard_to_cidr(src_host, src_wc) if src_host.lower() != "any" else "any"
+        acl["rules"].append({
+            "sequence": seq, "action": action, "protocol": "ip",
+            "src_network": src_net, "dst_network": "any",
+        })
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# VLAN list expander
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _parse_vlan_list(vlan_str: str) -> list[int]:
+    """Parse '10 20 30 to 40 50' → [10, 20, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 50]."""
+    vlans = []
+    tokens = vlan_str.strip().split()
+    idx = 0
+    while idx < len(tokens):
+        t = tokens[idx]
+        if t.lower() == "to":
+            idx += 1
+            continue
+        if t.isdigit():
+            val = int(t)
+            # Check if next token is "to"
+            if idx + 1 < len(tokens) and tokens[idx + 1].lower() == "to":
+                end_val = int(tokens[idx + 2]) if idx + 2 < len(tokens) else val
+                vlans.extend(range(val, end_val + 1))
+                idx += 3
+                continue
+            vlans.append(val)
+        idx += 1
+    return vlans
+
+
+def _wildcard_to_cidr(ip: str, wildcard: str) -> str:
+    """Convert wildcard mask to CIDR. 10.0.0.0 / 0.0.0.255 → 10.0.0.0/24."""
+    try:
+        wc_octets = [int(o) for o in wildcard.split(".")]
+        prefix_len = sum(bin(255 - o).count("1") for o in wc_octets)
+        return f"{ip}/{prefix_len}"
+    except Exception:
+        return ip

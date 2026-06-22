@@ -37,9 +37,9 @@ MAPPINGS = {
                 "os":            {"type": "keyword"},
                 "device_type":   {"type": "keyword"},
                 "location":      {"type": "keyword"},
-                "tags":          {"type": "keyword"},
                 "pop":           {"type": "keyword"},
                 "role":          {"type": "keyword"},
+                "tags":          {"type": "keyword"},
             }
         }
     },

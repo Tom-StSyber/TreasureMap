@@ -401,15 +401,43 @@ function FolderTab({ onSuccess }) {
           value={folder}
           onChange={e => setFolder(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !running && start()}
-          placeholder="/app/data  or  /external-data/configs/lab"
+          placeholder="/external-data/synthetic-lab"
           disabled={running}
           spellCheck={false}
         />
-        <div style={S.hint}>
-          Path on the backend server (Docker container). Use <code style={{color:'#7dd3fc'}}>/app/data</code> for
-          files in <code style={{color:'#7dd3fc'}}>backend/data/</code>.
-          Scans recursively for .cfg .conf .txt files.
-          Supports: Cisco IOS · JunOS · Huawei VRP · Dell OS10 · HPE Aruba OS-CX.
+
+        {/* Quick-fill buttons */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Synthetic lab', path: '/external-data/synthetic-lab' },
+            { label: 'All data',      path: '/external-data' },
+            { label: 'Sample configs', path: '/app/data' },
+          ].map(({ label, path }) => (
+            <button
+              key={path}
+              disabled={running}
+              onClick={() => setFolder(path)}
+              style={{
+                padding: '3px 10px', borderRadius: 4, border: '1px solid #334155',
+                background: folder === path ? '#1e3a5f' : '#1e293b',
+                color: folder === path ? '#7dd3fc' : '#64748b',
+                fontSize: 11, cursor: 'pointer', fontFamily: 'monospace',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ ...S.hint, marginTop: 6 }}>
+          <strong style={{ color: '#64748b' }}>Docker path mapping:</strong>{' '}
+          <code style={{color:'#7dd3fc'}}>TreasureMap\data\</code> →{' '}
+          <code style={{color:'#4ade80'}}>/external-data/</code>
+          {'  ·  '}
+          <code style={{color:'#7dd3fc'}}>TreasureMap\backend\data\</code> →{' '}
+          <code style={{color:'#4ade80'}}>/app/data/</code>
+          <br />
+          Scans recursively for .cfg .conf .txt · Cisco IOS · JunOS · Huawei VRP · Dell OS10 · HPE Aruba OS-CX
         </div>
       </div>
 

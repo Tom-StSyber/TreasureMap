@@ -22,9 +22,11 @@ class Device(BaseModel):
     os: str                             # IOS-XE | JunOS | ExtremeXOS | SR-OS | …
     device_type: str                    # router | switch | firewall | server | host
     location: Optional[str] = None
+    # POP / datacenter location — auto-detected from hostname or manually assigned
+    pop: Optional[str] = None           # e.g. "EQX-NYC", "DRT-VA", "NY"
+    # Functional role within the topology
+    role: Optional[str] = None          # gateway | oob | core | access | unknown
     tags: List[str] = Field(default_factory=list)
-    pop: Optional[str] = None            # Point of Presence code (e.g. "EQX-NYC")
-    role: Optional[str] = None           # gateway | switch | firewall | oob | loadbalancer | wireless
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +71,7 @@ class Connection(BaseModel):
     dst_device_name: str
     dst_interface: str
     # Link type drives edge colour in the UI
-    link_type: Literal["routed", "trunk", "access", "uplink", "crosslink", "bgp"] = "routed"
+    link_type: Literal["routed", "trunk", "access", "uplink", "crosslink"] = "routed"
     # Effective status of the link (derived from both interface admin/oper states)
     status: Literal["up", "down", "disabled"] = "up"
     # True when at least one ACL/firewall policy touches this link

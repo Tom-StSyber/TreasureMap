@@ -7,16 +7,24 @@
  *   edge-acl      orange solid line
  *   edge-trunk    thick blue solid line
  *
- * Node classes:
- *   node-pop      POP compound (parent) node — labelled bounding box
- *   role-gateway  larger diamond for PE/CE/gateway devices
- *   role-oob      dashed purple border for OOB/management devices
+ * Node role classes:
+ *   node-role-gateway   gold star border + larger node
+ *   node-role-oob       magenta border + dashed outline
+ *   node-role-core      teal accent border
+ *
+ * POP compound nodes:
+ *   pop-box         semi-transparent labelled box around POP members
+ *   pop-unassigned  invisible parent for devices with no detected POP
  *
  * When a pathfind result is active:
- *   edge-path     highlighted gold line (overlaid on top of existing style)
+ *   edge-path     highlighted gold line
  *   node-path     highlighted node
  *   node-src      source node
  *   node-dst      destination node
+ *
+ * Right-click context menu:
+ *   - Path Query from here  → calls onPathQueryFrom(nodeData)
+ *   - Assign to POP…        → calls onAssignPop(nodeData)
  */
 import { useEffect, useRef, useCallback, useState } from 'react'
 import cytoscape from 'cytoscape'
@@ -38,237 +46,217 @@ const DEVICE_EMOJI = {
 
 // ─── Cytoscape stylesheet ────────────────────────────────────────
 const STYLESHEET = [
-  // All nodes
+  // ── POP compound boxes ─────────────────────────────────────────
   {
-    selector: 'node',
+    selector: '.pop-box',
     style: {
-      'background-color': '#0f172a',
-      'border-width': 2,
-      'border-color': '#475569',
-      'label': 'data(label)',
-      'color': '#e2e8f0',
-      'font-size': 11,
-      'text-valign': 'bottom',
-      'text-halign': 'center',
-      'text-margin-y': 6,
-      'width': 64,
-      'height': 64,
-      'shape': 'roundrectangle',
-      'text-wrap': 'wrap',
-      'text-max-width': 100,
-      'background-fit': 'contain',
-      'background-clip': 'node',
-      'background-image-opacity': 1.0,
-      'background-width': '80%',
-      'background-height': '80%',
-    },
-  },
-  // Device-type specific colours + icons
-  {
-    selector: '.node-router',
-    style: {
-      'background-color': '#0f172a',
-      'border-color': '#60a5fa',
-      'background-image': 'url(/icons/router.png)',
+      'background-color':       'data(bg)',
+      'background-opacity':     0.35,
+      'border-color':           'data(border)',
+      'border-width':           2,
+      'border-style':           'solid',
+      'label':                  'data(label)',
+      'color':                  '#94a3b8',
+      'font-size':              13,
+      'font-weight':            700,
+      'text-valign':            'top',
+      'text-halign':            'center',
+      'text-margin-y':          -8,
+      'text-background-color':  '#0f1117',
+      'text-background-opacity':0.7,
+      'text-background-padding':4,
+      'padding':                24,
+      'shape':                  'round-rectangle',
     },
   },
   {
-    selector: '.node-switch',
+    selector: '.pop-unassigned',
     style: {
-      'background-color': '#0f172a',
-      'border-color': '#34d399',
-      'background-image': 'url(/icons/switch.png)',
+      'background-opacity': 0,
+      'border-width':       0,
+      'label':              '',
+      'padding':            16,
     },
   },
+
+  // ── Base device node ─────────────────────────────────────────
   {
-    selector: '.node-firewall',
+    selector: 'node:childless',   // only leaf (device) nodes get this
     style: {
-      'background-color': '#0f172a',
-      'border-color': '#fb923c',
-      'background-image': 'url(/icons/firewall.png)',
+      'background-color':  '#1e293b',
+      'border-width':      2,
+      'border-color':      '#475569',
+      'label':             'data(label)',
+      'color':             '#e2e8f0',
+      'font-size':         11,
+      'text-valign':       'bottom',
+      'text-halign':       'center',
+      'text-margin-y':     4,
+      'width':             48,
+      'height':            48,
+      'text-wrap':         'wrap',
+      'text-max-width':    90,
     },
   },
-  {
-    selector: '.node-server',
-    style: {
-      'background-color': '#0f172a',
-      'border-color': '#a78bfa',
-      'background-image': 'url(/icons/server.png)',
-    },
-  },
-  {
-    selector: '.node-host',
-    style: {
-      'background-color': '#0f172a',
-      'border-color': '#c4b5fd',
-      'background-image': 'url(/icons/host.png)',
-    },
-  },
+
+  // Device-type colours
+  { selector: '.node-router',   style: { 'background-color': '#1d4ed8', 'border-color': '#60a5fa' } },
+  { selector: '.node-switch',   style: { 'background-color': '#065f46', 'border-color': '#34d399' } },
+  { selector: '.node-firewall', style: { 'background-color': '#7c2d12', 'border-color': '#fb923c' } },
+  { selector: '.node-server',   style: { 'background-color': '#1e1b4b', 'border-color': '#a78bfa' } },
+  { selector: '.node-host',     style: { 'background-color': '#1e1b4b', 'border-color': '#c4b5fd' } },
   { selector: '.node-cloud',    style: { 'background-color': '#164e63', 'border-color': '#38bdf8' } },
+
+  // ── Role overlays ───────────────────────────────────────────
+  // Gateway — gold star border, larger, bold label
+  {
+    selector: '.node-role-gateway',
+    style: {
+      'border-color':  '#f59e0b',
+      'border-width':  4,
+      'width':         60,
+      'height':        60,
+      'font-weight':   700,
+      'font-size':     12,
+      'shape':         'diamond',
+    },
+  },
+  // OOB — magenta dashed border
+  {
+    selector: '.node-role-oob',
+    style: {
+      'border-color':  '#d946ef',
+      'border-width':  3,
+      'border-style':  'dashed',
+      'opacity':       0.85,
+    },
+  },
+  // Core — teal border
+  {
+    selector: '.node-role-core',
+    style: {
+      'border-color': '#14b8a6',
+      'border-width': 3,
+    },
+  },
 
   // ── Edge base ────────────────────────────────────────────────
   {
     selector: 'edge',
     style: {
-      'curve-style': 'bezier',
-      'width': 2,
-      'label': '',
-      'font-size': 10,
-      'color': '#94a3b8',
-      'text-background-color': '#0f1117',
-      'text-background-opacity': 0.8,
-      'text-background-padding': 2,
+      'curve-style':              'bezier',
+      'width':                    2,
+      'label':                    '',
+      'font-size':                10,
+      'color':                    '#94a3b8',
+      'text-background-color':    '#0f1117',
+      'text-background-opacity':  0.8,
+      'text-background-padding':  2,
     },
   },
-  // GREEN — physically up, no ACLs
-  {
-    selector: '.edge-up',
-    style: {
-      'line-color': '#22c55e',
-      'target-arrow-color': '#22c55e',
-      'line-style': 'solid',
-    },
-  },
-  // BLACK DASHED — admin disabled
-  {
-    selector: '.edge-disabled',
-    style: {
-      'line-color': '#64748b',
-      'target-arrow-color': '#64748b',
-      'line-style': 'dashed',
-      'line-dash-pattern': [8, 4],
-      'width': 1.5,
-      'opacity': 0.6,
-    },
-  },
-  // ORANGE — ACL or firewall policy applied
-  {
-    selector: '.edge-acl',
-    style: {
-      'line-color': '#f97316',
-      'target-arrow-color': '#f97316',
-      'line-style': 'solid',
-    },
-  },
-  // THICK BLUE — trunk link
-  {
-    selector: '.edge-trunk',
-    style: {
-      'line-color': '#3b82f6',
-      'target-arrow-color': '#3b82f6',
-      'line-style': 'solid',
-      'width': 5,
-    },
-  },
-  // PURPLE DASHED — BGP session
-  {
-    selector: '.edge-bgp',
-    style: {
-      'line-color': '#a855f7',
-      'target-arrow-color': '#a855f7',
-      'line-style': 'dashed',
-      'line-dash-pattern': [6, 3],
-      'width': 1.5,
-      'opacity': 0.75,
-    },
-  },
+  { selector: '.edge-up',
+    style: { 'line-color': '#22c55e', 'target-arrow-color': '#22c55e', 'line-style': 'solid' } },
+  { selector: '.edge-disabled',
+    style: { 'line-color': '#64748b', 'target-arrow-color': '#64748b',
+              'line-style': 'dashed', 'line-dash-pattern': [8, 4], 'width': 1.5, 'opacity': 0.6 } },
+  { selector: '.edge-acl',
+    style: { 'line-color': '#f97316', 'target-arrow-color': '#f97316', 'line-style': 'solid' } },
+  { selector: '.edge-trunk',
+    style: { 'line-color': '#3b82f6', 'target-arrow-color': '#3b82f6', 'line-style': 'solid', 'width': 5 } },
 
   // ── Path highlight ───────────────────────────────────────────
-  {
-    selector: '.edge-path',
-    style: {
-      'line-color': '#facc15',
-      'target-arrow-color': '#facc15',
-      'width': 6,
-      'z-index': 10,
-      'opacity': 1,
-    },
-  },
-  {
-    selector: '.node-path',
-    style: {
-      'border-color': '#facc15',
-      'border-width': 3,
-    },
-  },
-  {
-    selector: '.node-src',
-    style: {
-      'border-color': '#4ade80',
-      'border-width': 4,
-      'background-color': '#14532d',
-    },
-  },
-  {
-    selector: '.node-dst',
-    style: {
-      'border-color': '#f87171',
-      'border-width': 4,
-      'background-color': '#450a0a',
-    },
-  },
+  { selector: '.edge-path',
+    style: { 'line-color': '#facc15', 'target-arrow-color': '#facc15', 'width': 6, 'z-index': 10, 'opacity': 1 } },
+  { selector: '.node-path',
+    style: { 'border-color': '#facc15', 'border-width': 3 } },
+  { selector: '.node-src',
+    style: { 'border-color': '#4ade80', 'border-width': 4, 'background-color': '#14532d' } },
+  { selector: '.node-dst',
+    style: { 'border-color': '#f87171', 'border-width': 4, 'background-color': '#450a0a' } },
 
-  // Selected node
-  {
-    selector: 'node:selected',
-    style: {
-      'border-color': '#f59e0b',
-      'border-width': 3,
-    },
-  },
-
-  // ── POP compound nodes ───────────────────────────────────────
-  {
-    selector: '.node-pop',
-    style: {
-      'background-color': '#0f172a',
-      'background-opacity': 0.5,
-      'border-color': '#334155',
-      'border-width': 1,
-      'border-style': 'dashed',
-      'label': 'data(label)',
-      'color': '#475569',
-      'font-size': 13,
-      'font-weight': 700,
-      'text-valign': 'top',
-      'text-halign': 'center',
-      'text-margin-y': -6,
-      'padding': '20px',
-      'shape': 'roundrectangle',
-    },
-  },
-
-  // ── Role styles ──────────────────────────────────────────────
-  // Gateway / Provider Edge — larger diamond, amber border
-  {
-    selector: '.role-gateway',
-    style: {
-      'shape': 'diamond',
-      'width': 72,
-      'height': 72,
-      'border-color': '#f59e0b',
-      'border-width': 3,
-    },
-  },
-  // OOB / management — dashed purple border
-  {
-    selector: '.role-oob',
-    style: {
-      'border-color': '#a855f7',
-      'border-width': 2,
-      'border-style': 'dashed',
-    },
-  },
+  // Selected
+  { selector: 'node:childless:selected',
+    style: { 'border-color': '#f59e0b', 'border-width': 3 } },
 ]
+
+// ─── Context menu ─────────────────────────────────────────────────
+const MENU_STYLE = {
+  position: 'fixed',
+  zIndex:   9999,
+  background:   '#1e293b',
+  border:       '1px solid #334155',
+  borderRadius: 8,
+  boxShadow:    '0 8px 32px rgba(0,0,0,0.5)',
+  minWidth:     180,
+  overflow:     'hidden',
+  fontSize:     13,
+  color:        '#e2e8f0',
+}
+const MENU_ITEM_STYLE = {
+  padding:    '9px 16px',
+  cursor:     'pointer',
+  display:    'flex',
+  alignItems: 'center',
+  gap:        8,
+  transition: 'background 0.1s',
+}
+const MENU_DIVIDER = { height: 1, background: '#334155', margin: '4px 0' }
+
+function ContextMenu({ x, y, nodeData, onClose, onPathQuery, onAssignPop }) {
+  const [hovered, setHovered] = useState(null)
+
+  const item = (icon, label, action) => (
+    <div
+      style={{
+        ...MENU_ITEM_STYLE,
+        background: hovered === label ? '#334155' : 'transparent',
+      }}
+      onMouseEnter={() => setHovered(label)}
+      onMouseLeave={() => setHovered(null)}
+      onClick={() => { action(); onClose(); }}
+    >
+      <span>{icon}</span>
+      <span>{label}</span>
+    </div>
+  )
+
+  return (
+    <div style={{ ...MENU_STYLE, left: x, top: y }} onContextMenu={e => e.preventDefault()}>
+      <div style={{ padding: '6px 16px 4px', fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+        {nodeData?.label || 'Device'}
+      </div>
+      <div style={MENU_DIVIDER} />
+      {item('🔍', 'Path Query from here', () => onPathQuery(nodeData))}
+      {item('📍', 'Assign to POP…',       () => onAssignPop(nodeData))}
+    </div>
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────
 
-const CTX_MENU_W = 180
-
-export default function TopologyGraph({ elements, pathResult, onNodeClick, onEdgeClick, onPathFrom, onAssignPop }) {
+export default function TopologyGraph({
+  elements,
+  pathResult,
+  onNodeClick,
+  onEdgeClick,
+  onPathQueryFrom,   // (nodeData) → pre-fill PathSearch source
+  onAssignPop,       // (nodeData) → open POP assign modal
+}) {
   const containerRef = useRef(null)
-  const cyRef = useRef(null)
-  const [ctxMenu, setCtxMenu] = useState(null) // { x, y, nodeData } | null
+  const cyRef        = useRef(null)
+  const [menu, setMenu] = useState(null)   // { x, y, nodeData }
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('contextmenu', close)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('contextmenu', close)
+    }
+  }, [menu])
 
   // Initialise Cytoscape once
   useEffect(() => {
@@ -279,38 +267,38 @@ export default function TopologyGraph({ elements, pathResult, onNodeClick, onEdg
       elements: [],
       style: STYLESHEET,
       layout: { name: 'preset' },
-      userZoomingEnabled: true,
-      userPanningEnabled: true,
+      userZoomingEnabled:  true,
+      userPanningEnabled:  true,
       boxSelectionEnabled: false,
-      minZoom: 0.1,
+      minZoom: 0.05,
       maxZoom: 4,
     })
 
-    cy.on('tap', 'node', evt => {
-      if (evt.target.data('is_pop')) return  // ignore clicks on POP compound nodes
+    // Left-click → select node/edge
+    cy.on('tap', 'node:childless', evt => {
       onNodeClick?.(evt.target.data())
-      setCtxMenu(null)
     })
     cy.on('tap', 'edge', evt => {
       onEdgeClick?.(evt.target.data())
-      setCtxMenu(null)
     })
     cy.on('tap', evt => {
       if (evt.target === cy) {
         onNodeClick?.(null)
         onEdgeClick?.(null)
-        setCtxMenu(null)
+        setMenu(null)
       }
     })
-    cy.on('cxttap', 'node', evt => {
-      if (evt.target.data('is_pop')) return  // no context menu on POP wrappers
-      const pos = evt.renderedPosition || evt.position
-      const container = containerRef.current
-      const rect = container?.getBoundingClientRect?.() || { left: 0, top: 0 }
-      // Adjust so menu doesn't overflow right/bottom
-      const x = pos.x + rect.left
-      const y = pos.y + rect.top
-      setCtxMenu({ x, y, nodeData: evt.target.data() })
+
+    // Right-click on device node → context menu
+    cy.on('cxttap', 'node:childless', evt => {
+      evt.originalEvent?.preventDefault()
+      const rendPos = evt.renderedPosition
+      const container = containerRef.current.getBoundingClientRect()
+      setMenu({
+        x: container.left + rendPos.x,
+        y: container.top  + rendPos.y,
+        nodeData: evt.target.data(),
+      })
     })
 
     cyRef.current = cy
@@ -327,27 +315,26 @@ export default function TopologyGraph({ elements, pathResult, onNodeClick, onEdg
       cy.add(elements)
     })
 
-    // Run dagre layout
+    // Run dagre layout on device nodes; POP boxes follow their children
     cy.layout({
-      name: 'dagre',
-      rankDir: 'TB',
-      nodeSep: 40,
-      rankSep: 120,
-      ranker: 'network-simplex',
-      animate: true,
-      animationDuration: 400,
+      name:             'dagre',
+      rankDir:          'TB',
+      nodeSep:          70,
+      rankSep:          110,
+      animate:          true,
+      animationDuration:400,
+      // Only apply layout to childless nodes (devices), not POP boxes
+      fit:              true,
+      padding:          40,
     }).run()
 
   }, [elements])
 
-  // Highlight path without re-running layout
+  // Highlight path
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
-
-    // Clear previous highlights
     cy.elements().removeClass('edge-path node-path node-src node-dst')
-
     if (!pathResult?.found || !pathResult.path?.length) return
 
     pathResult.path.forEach((nodeName, idx) => {
@@ -356,75 +343,31 @@ export default function TopologyGraph({ elements, pathResult, onNodeClick, onEdg
       else if (idx === pathResult.path.length - 1) n.addClass('node-dst')
       else n.addClass('node-path')
     })
-
     pathResult.edges?.forEach(edgeId => {
       cy.$(`#${CSS.escape(edgeId)}`).addClass('edge-path')
     })
-
-    // Fit view to highlighted path
     const pathEls = cy.$('.edge-path, .node-src, .node-dst, .node-path')
-    if (pathEls.length) {
-      cy.fit(pathEls, 80)
-    }
+    if (pathEls.length) cy.fit(pathEls, 80)
   }, [pathResult])
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%', background: '#0f1117' }} />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div
+        ref={containerRef}
+        style={{ width: '100%', height: '100%', background: '#0f1117' }}
+      />
 
-      {/* Right-click context menu */}
-      {ctxMenu && (
-        <div
-          style={{
-            position: 'fixed',
-            left: Math.min(ctxMenu.x, window.innerWidth - CTX_MENU_W - 8),
-            top: ctxMenu.y,
-            width: CTX_MENU_W,
-            background: '#1e293b',
-            border: '1px solid #334155',
-            borderRadius: 8,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-            zIndex: 500,
-            overflow: 'hidden',
-          }}
-          onMouseLeave={() => setCtxMenu(null)}
-        >
-          <div style={{
-            padding: '6px 12px', fontSize: 11, fontWeight: 700,
-            color: '#64748b', borderBottom: '1px solid #334155',
-            background: '#111827',
-          }}>
-            {ctxMenu.nodeData.label}
-          </div>
-
-          <button
-            style={ctxBtnStyle}
-            onClick={() => {
-              onPathFrom?.(ctxMenu.nodeData.label)
-              setCtxMenu(null)
-            }}
-          >
-            🔍 Path Query from here
-          </button>
-
-          <button
-            style={ctxBtnStyle}
-            onClick={() => {
-              onAssignPop?.(ctxMenu.nodeData)
-              setCtxMenu(null)
-            }}
-          >
-            📍 Assign to POP…
-          </button>
-        </div>
+      {/* Context menu */}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          nodeData={menu.nodeData}
+          onClose={() => setMenu(null)}
+          onPathQuery={data => { onPathQueryFrom?.(data); setMenu(null) }}
+          onAssignPop={data => { onAssignPop?.(data);    setMenu(null) }}
+        />
       )}
     </div>
   )
-}
-
-const ctxBtnStyle = {
-  display: 'block', width: '100%', padding: '9px 14px',
-  background: 'none', border: 'none', cursor: 'pointer',
-  color: '#cbd5e1', fontSize: 13, textAlign: 'left',
-  transition: 'background 0.1s',
 }

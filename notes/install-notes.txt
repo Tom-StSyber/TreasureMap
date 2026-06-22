@@ -1,0 +1,101 @@
+
+sudo ./Install-TreasureMap.sh 
+
+# Installs Docker 
+# Fails on NPM 
+sudo apt install npm -y 
+
+# Installs NPM 
+npm run build 
+
+# vita fails 
+# npm ERR! 
+enoent ENOENT: no such file or directory, open '/home/ALTLAB/tm/Documents/TreasureMap/package.json' 
+"scripts": 
+"dev": "vite", 
+"build": "vite build", 
+"preview": "vite preview" 
+  
+cd frontend/ 
+/frontend$ npm i -D vite 
+cd .. 
+rm -rf node_modules package-lock.json yarn.lock 
+npm init -y 
+npm i -D vite 
+npm pkg set scripts.dev="vite" 
+npm pkg set scripts.build="vite build" 
+npm pkg set scripts.preview="vite preview" 
+npm install 
+# 2 vulnerabilities (1 moderate, 1 high) 
+npm audit fix --force 
+npm run build 
+
+# You are using Node.js 18.19.1. Vite requires Node.js version 20.19+ or 22.12+. Please upgrade your Node.js version. 
+
+node -v 
+# v18.19.1 
+
+npm -v 
+# 9.2.0 
+
+which node 
+# /usr/bin/node 
+
+# Install nvm 
+wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash 
+
+# Set nvm to home (~/.bashrc) 
+export NVM_DIR="$([ -z "${XDG_CONFIG_HOME-}" ] && printf %s "${HOME}/.nvm" || printf %s "${XDG_CONFIG_HOME}/nvm")" 
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" command -v nvm 
+
+# nvm vm alias default 20 
+# default -> 20 (-> v20.20.2) 
+
+npm install 
+
+# Multiple dependency issues... 
+npm error code ERESOLVE 
+npm error ERESOLVE could not resolve 
+npm error 
+npm error While resolving: @vitejs/plugin-react@4.7.0 
+npm error Found: vite@8.0.16 npm error node_modules/vite 
+npm error dev vite@"^8.0.16" from the root project 
+npm error 
+npm error Could not resolve dependency: 
+npm error peer vite@"^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0" from @vitejs/plugin-react@4.7.0 
+npm error node_modules/@vitejs/plugin-react 
+npm error dev @vitejs/plugin-react@"^4.3.1" from the root project 
+npm error 
+npm error Conflicting peer dependency: vite@7.3.5 
+npm error node_modules/vite 
+npm error peer vite@"^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0" from @vitejs/plugin-react@4.7.0 
+npm error node_modules/@vitejs/plugin-react 
+npm error dev @vitejs/plugin-react@"^4.3.1" from the root project 
+npm error 
+npm error Fix the upstream dependency conflict, or retry 
+npm error this command with --force or --legacy-peer-deps 
+npm error to accept an incorrect (and potentially broken) dependency resolution. 
+
+npm install --force 
+npm warn using --force Recommended protections disabled. 
+npm warn ERESOLVE overriding peer dependency 
+npm warn While resolving: @vitejs/plugin-react@4.7.0 
+npm warn Found: vite@8.0.16 npm warn node_modules/vite 
+npm warn dev vite@"^8.0.16" from the root project 
+npm warn 
+npm warn Could not resolve dependency: 
+npm warn peer vite@"^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0" from @vitejs/plugin-react@4.7.0 
+npm warn node_modules/@vitejs/plugin-react 
+npm warn dev @vitejs/plugin-react@"^4.3.1" from the root project 
+npm warn 
+npm warn Conflicting peer dependency: vite@7.3.5 
+npm warn node_modules/vite 
+npm warn peer vite@"^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0" from @vitejs/plugin-react@4.7.0 
+npm warn node_modules/@vitejs/plugin-react 
+npm warn dev @vitejs/plugin-react@"^4.3.1" from the root project added 2 packages, and audited 75 packages in 3s 
+13 packages are looking for funding run `npm fund` for details found 0 vulnerabilities 
+
+# More issues... 
+npm install -g npm@11.17.0 ~/TreasureMap/tree/main/frontend/src/components 
+[UNRESOLVED_IMPORT] Could not resolve './components/PopAssignModal.jsx' in src/App.jsx 
+# Need to update!!!

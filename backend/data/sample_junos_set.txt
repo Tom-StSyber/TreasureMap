@@ -1,0 +1,55 @@
+## Last commit: 2024-01-15 09:00:00 UTC
+## Model: EX4300-48P
+## Junos: 22.4R1.10
+set system host-name eqx-nyc-sw-01
+set system domain-name lab.local
+set system ntp server 10.0.0.1
+
+set interfaces ge-0/0/0 description "UPLINK-TO-EQX-NYC-PE-01-ge-0/0/1"
+set interfaces ge-0/0/0 unit 0 family ethernet-switching interface-mode trunk
+set interfaces ge-0/0/0 unit 0 family ethernet-switching vlan members 100
+set interfaces ge-0/0/0 unit 0 family ethernet-switching vlan members 200
+
+set interfaces ge-0/0/1 description "SERVER-01-ACCESS"
+set interfaces ge-0/0/1 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members 100
+
+set interfaces ge-0/0/2 description "SERVER-02-ACCESS"
+set interfaces ge-0/0/2 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/2 unit 0 family ethernet-switching vlan members 100
+
+set interfaces ge-0/0/3 description "OOB-CONSOLE-ACCESS"
+set interfaces ge-0/0/3 unit 0 family ethernet-switching interface-mode access
+set interfaces ge-0/0/3 unit 0 family ethernet-switching vlan members 200
+
+set interfaces ge-0/0/4 disable
+set interfaces ge-0/0/4 description "UNUSED-PORT"
+
+set interfaces ge-0/0/5 description "TRUNK-TO-EQX-NYC-SW-02"
+set interfaces ge-0/0/5 unit 0 family ethernet-switching interface-mode trunk
+set interfaces ge-0/0/5 unit 0 family ethernet-switching vlan members 100
+set interfaces ge-0/0/5 unit 0 family ethernet-switching vlan members 200
+
+set interfaces irb unit 100 description "VLAN100-IRB"
+set interfaces irb unit 100 family inet address 10.0.100.1/24
+set interfaces irb unit 100 family inet filter input VLAN100-IN
+
+set interfaces irb unit 200 description "MGMT-VLAN-IRB"
+set interfaces irb unit 200 family inet address 10.0.200.1/24
+
+set interfaces me0 description "MANAGEMENT"
+set interfaces me0 unit 0 family inet address 192.168.1.2/24
+
+set firewall family inet filter VLAN100-IN term ALLOW-SSH from protocol tcp
+set firewall family inet filter VLAN100-IN term ALLOW-SSH from destination-port 22
+set firewall family inet filter VLAN100-IN term ALLOW-SSH then accept
+set firewall family inet filter VLAN100-IN term ALLOW-ICMP from protocol icmp
+set firewall family inet filter VLAN100-IN term ALLOW-ICMP then accept
+set firewall family inet filter VLAN100-IN term DENY-ALL then reject
+
+set vlans VLAN100 vlan-id 100
+set vlans VLAN100 l3-interface irb.100
+set vlans VLAN200 vlan-id 200
+set vlans VLAN200 l3-interface irb.200
+
+set routing-options static route 0.0.0.0/0 next-hop 10.0.100.254

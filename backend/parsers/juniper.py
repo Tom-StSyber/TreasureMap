@@ -1,480 +1,245 @@
-"""
-parsers/juniper.py — Juniper JunOS configuration parser.
-
-Supports two input formats:
-  1. Hierarchical (stanza-based):
-       system { host-name eqx-nyc-pe-01; }
-       interfaces { ge-0/0/0 { description "uplink"; unit 0 { family inet { address 10.0.0.1/30; } } } }
-  2. Set-format (one directive per line):
-       set system host-name eqx-nyc-sw-01
-       set interfaces ge-0/0/0 unit 0 family inet address 10.0.0.1/30
-
-Detection heuristic
--------------------
-  Hierarchical: contains "system {" or "interfaces {" with stanza-style braces
-  Set-format:   majority of non-blank lines start with "set "
-"""
+"""TreasureMap -- Juniper JunOS config parser (set and hierarchical)."""
 from __future__ import annotations
-
-import ipaddress
-import re
-from pathlib import Path
+import re, logging
 from typing import Optional
+log = logging.getLogger(__name__)
 
+def _cidr(s):
+    s = s.rstrip(';').strip()
+    if '/' in s:
+        ip, pl = s.split('/', 1)
+        try: return ip.strip(), int(pl.strip())
+        except: return ip.strip(), None
+    return s, None
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Format detection
-# ──────────────────────────────────────────────────────────────────────────────
+def _iface_new(name):
+    return {'name':name,'description':None,'ip_address':None,'prefix_length':None,
+            'mac_address':None,'admin_status':'up','oper_status':'up','vlan_mode':'none',
+            'vlan_id':None,'trunk_vlans':[],'native_vlan':None,'acl_in':None,
+            'acl_out':None,'firewall_policy':None,'speed_mbps':None,'duplex':None}
 
-def is_junos_config(text: str) -> bool:
-    """Return True if text looks like a JunOS config (either format)."""
-    return is_junos_hierarchical(text) or is_junos_set(text)
+def _ensure(ifaces, name):
+    if name not in ifaces: ifaces[name] = _iface_new(name)
 
+def _acl_new(name):
+    return {'name':name,'acl_type':'named','rules':[]}
 
-def is_junos_hierarchical(text: str) -> bool:
-    has_system = bool(re.search(r"^\s*system\s*\{", text, re.MULTILINE))
-    has_ifaces = bool(re.search(r"^\s*interfaces\s*\{", text, re.MULTILINE))
-    has_version = bool(re.search(r"^\s*version\s+\d+\.\d+[A-Z]\d+", text, re.MULTILINE))
-    return (has_system or has_version) and has_ifaces
+def _acl_upsert(acl, term, field, value):
+    for r in acl['rules']:
+        if r.get('description') == term:
+            r[field] = value; return
+    seq = len(acl['rules'])*10+10
+    r = {'sequence':seq,'action':'permit','protocol':'ip','src_network':'any','dst_network':'any','description':term}
+    r[field] = value
+    acl['rules'].append(r)
 
+def _mgmt_ip(ifaces):
+    for n,i in ifaces.items():
+        if re.match(r'lo0?',n,re.I) and i.get('ip_address'): return i['ip_address']
+    for n,i in ifaces.items():
+        if re.match(r'(fxp0|me0|em0|mgmt)',n,re.I) and i.get('ip_address'): return i['ip_address']
+    for i in ifaces.values():
+        if i.get('ip_address') and i['ip_address'] != '0.0.0.0': return i['ip_address']
+    return None
 
-def is_junos_set(text: str) -> bool:
-    non_blank = [l for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
-    if not non_blank:
-        return False
-    set_lines = sum(1 for l in non_blank if l.strip().startswith("set "))
-    return set_lines >= max(3, len(non_blank) * 0.6)
+def _dtype(hostname, ifaces):
+    h = hostname.lower()
+    if any(k in h for k in ('fw','srx','firewall')): return 'firewall'
+    if any(k in h for k in ('sw','switch','ex','qfx')): return 'switch'
+    if any(k in h for k in ('router','mx','pe','core','edge','border','gw')): return 'router'
+    return 'router' if sum(1 for i in ifaces.values() if i.get('ip_address')) >= 2 else 'switch'
 
+def _detect_format(raw):
+    return 'set' if sum(1 for l in raw.splitlines() if l.strip().startswith('set ')) > 5 else 'hierarchical'
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _mask_to_prefix(mask: str) -> Optional[int]:
-    try:
-        return ipaddress.IPv4Network(f"0.0.0.0/{mask}", strict=False).prefixlen
-    except ValueError:
-        return None
-
-
-def _empty_iface(name: str) -> dict:
-    return {
-        "name": name,
-        "description": None,
-        "ip_address": None,
-        "prefix_length": None,
-        "admin_status": "up",
-        "vlan_mode": "none",
-        "vlan_id": None,
-        "trunk_vlans": [],
-        "native_vlan": None,
-        "acl_in": None,
-        "acl_out": None,
-    }
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Hierarchical parser
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _strip_semicolon(s: str) -> str:
-    return s.rstrip(";").strip()
-
-
-def _parse_hierarchical(text: str, source_path: Path) -> dict:
-    """Parse a JunOS hierarchical (stanza-based) configuration."""
-    result = {
-        "hostname": source_path.stem,
-        "vendor": "Juniper",
-        "os": "JunOS",
-        "device_type": "router",
-        "version": "",
-        "model": "",
-        "interfaces": [],
-        "acls": [],
-        "bgp_peers": [],
-        "source_file": source_path.name,
-    }
-
-    lines = text.splitlines()
-    n = len(lines)
-    i = 0
-
-    # We need to parse the top-level stanzas.
-    # Simple single-pass approach: track brace depth.
-    # Top-level stanzas: system {}, interfaces {}, routing-options {}, protocols {}
-
-    def skip_to_close(start_i: int) -> int:
-        """Return the index after the matching closing brace for block starting at start_i."""
-        depth = 0
-        j = start_i
-        while j < n:
-            for ch in lines[j]:
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        return j + 1
-            j += 1
-        return n
-
-    def collect_block(start_i: int) -> list[str]:
-        """Collect lines of a block (including nested), returns lines between outer braces."""
-        depth = 0
-        collected = []
-        j = start_i
-        while j < n:
-            line = lines[j]
-            for ch in line:
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-            if depth > 0 or (depth == 0 and j == start_i):
-                collected.append(line)
-            elif depth == 0:
-                collected.append(line)
-                break
-            j += 1
-        return collected
-
-    while i < n:
-        line = lines[i].strip()
-
-        # version
-        m = re.match(r"^version\s+([\d.A-Z\-]+)", line)
+# --- Set format ---
+def _parse_set(raw, hostname):
+    ifaces, acls = {}, {}
+    m = re.search(r'set system host-name\s+(\S+)', raw)
+    if m and hostname == 'unknown': hostname = m.group(1)
+    model = 'JunOS Device'
+    m = re.search(r'#\s*Model:\s*(\S+)', raw, re.I)
+    if m: model = m.group(1)
+    for line in raw.splitlines():
+        line = line.strip()
+        m = re.match(r'set interfaces (\S+) description [\'"]?(.+?)[\'"]?\s*$', line)
         if m:
-            result["version"] = m.group(1)
-            i += 1
-            continue
-
-        # system { ... }
-        if re.match(r"^system\s*\{", line):
-            # parse system block for hostname and model
-            j = i + 1
-            while j < n:
-                sub = lines[j].strip()
-                if sub == "}":
-                    break
-                if re.match(r"^host-name\s+", sub):
-                    result["hostname"] = _strip_semicolon(sub.split(None, 1)[1])
-                j += 1
-            i = skip_to_close(i)
-            continue
-
-        # interfaces { ... }
-        if re.match(r"^interfaces\s*\{", line):
-            i = _parse_hierarchical_interfaces(lines, i + 1, n, result)
-            continue
-
-        # routing-options { ... } for static routes / BGP info
-        if re.match(r"^routing-options\s*\{", line):
-            i = skip_to_close(i)
-            continue
-
-        # protocols { bgp { ... } }
-        if re.match(r"^protocols\s*\{", line):
-            i = _parse_protocols_block(lines, i + 1, n, result)
-            continue
-
-        i += 1
-
-    return result
-
-
-def _parse_hierarchical_interfaces(lines: list[str], start: int, n: int, result: dict) -> int:
-    """Parse the interfaces { ... } block. Returns next line index after closing }."""
-    i = start
-    depth = 1  # we entered after the opening {
-
-    while i < n and depth > 0:
-        line = lines[i]
-        stripped = line.strip()
-
-        if "{" in stripped:
-            depth += stripped.count("{")
-        if "}" in stripped:
-            depth -= stripped.count("}")
-            if depth <= 0:
-                return i + 1
-
-        # Interface definition: one level inside interfaces {} (depth == 2 BEFORE the { is counted)
-        # We check depth == 2 (was 1, now 2 after counting the opening {)
-        m = re.match(r"^\s{0,4}(\S+)\s*\{", line)  # e.g. "    ge-0/0/0 {"
-        if m and depth == 2:
-            iface_name = m.group(1)
-            # Skip management interfaces that aren't topology-relevant
-            if not re.match(r"^(fxp\d+|em\d+)$", iface_name):
-                iface = _empty_iface(iface_name)
-                i = _parse_one_iface(lines, i + 1, n, iface)
-                result["interfaces"].append(iface)
-                # _parse_one_iface consumed everything including the closing },
-                # so reset depth to 1 (back inside interfaces {})
-                depth = 1
-                continue
-
-        i += 1
-
-    return i
-
-
-def _parse_one_iface(lines: list[str], start: int, n: int, iface: dict) -> int:
-    """Parse one interface block. Returns next line index after closing }."""
-    i = start
-    depth = 1
-
-    while i < n and depth > 0:
-        line = lines[i]
-        stripped = line.strip()
-
-        open_count = stripped.count("{")
-        close_count = stripped.count("}")
-        depth += open_count - close_count
-
-        if depth <= 0:
-            return i + 1
-
-        # Description
-        m = re.match(r"^\s*description\s+\"?(.+?)\"?\s*;", line)
+            n,d = m.group(1),m.group(2); _ensure(ifaces,n); ifaces[n]['description']=d; continue
+        m = re.match(r'set interfaces (\S+) disable\s*$', line)
         if m:
-            iface["description"] = m.group(1).strip()
-
-        # Disable (JunOS uses 'disable;' to admin-down an interface)
-        if stripped == "disable;":
-            iface["admin_status"] = "disabled"
-
-        # Unit 0 — look for family inet address
-        addr_m = re.match(r"^\s*address\s+(\d+\.\d+\.\d+\.\d+)/(\d+)\s*;", line)
-        if addr_m and iface["ip_address"] is None:
-            iface["ip_address"] = addr_m.group(1)
-            iface["prefix_length"] = int(addr_m.group(2))
-
-        # Ethernet-switching: interface-mode
-        mode_m = re.match(r"^\s*interface-mode\s+(trunk|access)\s*;", line)
-        if mode_m:
-            iface["vlan_mode"] = mode_m.group(1)
-
-        # Ethernet-switching: vlan members
-        vlan_m = re.match(r"^\s*members\s+(.+?)\s*;", line)
-        if vlan_m:
-            raw = vlan_m.group(1).strip()
-            # Could be VLAN name, range like "10-20", or list
-            vlans = _parse_junos_vlan_members(raw)
-            if vlans:
-                if iface["vlan_mode"] == "access" and len(vlans) == 1:
-                    iface["vlan_id"] = vlans[0]
+            n=m.group(1); _ensure(ifaces,n); ifaces[n]['admin_status']='disabled'; continue
+        m = re.match(r'set interfaces (\S+) unit (\d+) family inet address (\S+)', line)
+        if m:
+            b,u,a = m.group(1),m.group(2),m.group(3).rstrip(';')
+            k = f'{b}.{u}' if u!='0' else b; _ensure(ifaces,k)
+            ip,pl = _cidr(a); ifaces[k]['ip_address']=ip
+            if pl: ifaces[k]['prefix_length']=pl
+            ifaces[k]['vlan_mode']='routed'; continue
+        m = re.match(r'set interfaces (\S+) unit (\d+) family ethernet-switching vlan members (\S+)', line)
+        if m:
+            b,u,v = m.group(1),m.group(2),m.group(3).rstrip(';')
+            k = f'{b}.{u}' if u!='0' else b; _ensure(ifaces,k)
+            try:
+                vid = int(v)
+                if ifaces[k]['vlan_mode'] == 'trunk':
+                    if vid not in ifaces[k]['trunk_vlans']:
+                        ifaces[k]['trunk_vlans'].append(vid)
                 else:
-                    # Retain trunk mode; don't downgrade to access
-                    if iface["vlan_mode"] != "trunk":
-                        iface["vlan_mode"] = "trunk"
-                    iface["trunk_vlans"].extend(vlans)
-
-        i += 1
-
-    return i
-
-
-def _parse_protocols_block(lines: list[str], start: int, n: int, result: dict) -> int:
-    """Parse protocols { bgp { ... } } for BGP peer data."""
-    i = start
-    depth = 1
-    local_as = None
-
-    while i < n and depth > 0:
-        line = lines[i]
-        stripped = line.strip()
-
-        open_count = stripped.count("{")
-        close_count = stripped.count("}")
-        depth += open_count - close_count
-
-        if depth <= 0:
-            return i + 1
-
-        # local-as
-        m = re.match(r"^\s*local-as\s+(\d+)\s*;", line)
-        if m:
-            local_as = int(m.group(1))
-
-        # neighbor <ip> { remote-as N; }
-        nb_m = re.match(r"^\s*neighbor\s+(\d+\.\d+\.\d+\.\d+)\s*\{", line)
-        if nb_m:
-            peer_ip = nb_m.group(1)
-            # Look ahead for remote-as in the neighbor block
-            j = i + 1
-            peer_depth = 1
-            remote_as = None
-            while j < n and peer_depth > 0:
-                sub = lines[j].strip()
-                peer_depth += sub.count("{") - sub.count("}")
-                ra_m = re.match(r"^peer-as\s+(\d+)\s*;", sub)
-                if not ra_m:
-                    ra_m = re.match(r"^remote-as\s+(\d+)\s*;", sub)
-                if ra_m:
-                    remote_as = int(ra_m.group(1))
-                j += 1
-            if peer_ip and remote_as and local_as:
-                result["bgp_peers"].append({
-                    "peer_ip": peer_ip,
-                    "local_as": local_as,
-                    "remote_as": remote_as,
-                })
-
-        i += 1
-
-    return i
-
-
-def _parse_junos_vlan_members(raw: str) -> list[int]:
-    """Parse JunOS vlan members: numeric IDs, ranges '10-20', or skip named VLANs."""
-    vlans = []
-    for tok in re.split(r"[\s,]+", raw):
-        tok = tok.strip()
-        if not tok:
+                    ifaces[k]['vlan_id'] = vid
+                    ifaces[k]['vlan_mode'] = 'access'
+            except: pass
             continue
-        range_m = re.match(r"^(\d+)-(\d+)$", tok)
-        if range_m:
-            lo, hi = int(range_m.group(1)), int(range_m.group(2))
-            vlans.extend(range(lo, hi + 1))
-        elif tok.isdigit():
-            vlans.append(int(tok))
-        # else: named VLAN — skip numeric conversion
-    return vlans
+        m = re.match(r'set interfaces (\S+) unit (\d+) family ethernet-switching interface-mode trunk', line)
+        if m:
+            b,u = m.group(1),m.group(2); k=f'{b}.{u}' if u!='0' else b
+            _ensure(ifaces,k); ifaces[k]['vlan_mode']='trunk'; continue
+        m = re.match(r'set interfaces (\S+) unit (\d+) family inet filter (input|output) (\S+)', line)
+        if m:
+            b,u,d,f = m.groups(); f=f.rstrip(';'); k=f'{b}.{u}' if u!='0' else b
+            _ensure(ifaces,k)
+            if d=='input': ifaces[k]['acl_in']=f
+            else: ifaces[k]['acl_out']=f
+            ifaces[k]['firewall_policy']=f; continue
+        m = re.match(r'set firewall family inet filter (\S+) term (\S+) then (accept|reject|discard)', line)
+        if m:
+            fn,tn,ac = m.groups()
+            if fn not in acls: acls[fn]=_acl_new(fn)
+            acls[fn]['rules'].append({'sequence':len(acls[fn]['rules'])*10+10,
+                'action':'permit' if ac=='accept' else 'deny','protocol':'ip',
+                'src_network':'any','dst_network':'any','description':tn}); continue
+        m = re.match(r'set firewall family inet filter (\S+) term (\S+) from source-address (\S+)', line)
+        if m:
+            fn,tn,src = m.groups()
+            if fn not in acls: acls[fn]=_acl_new(fn)
+            _acl_upsert(acls[fn],tn,'src_network',src.rstrip(';')); continue
+        m = re.match(r'set firewall family inet filter (\S+) term (\S+) from destination-address (\S+)', line)
+        if m:
+            fn,tn,dst = m.groups()
+            if fn not in acls: acls[fn]=_acl_new(fn)
+            _acl_upsert(acls[fn],tn,'dst_network',dst.rstrip(';')); continue
+        m = re.match(r'set firewall family inet filter (\S+) term (\S+) from protocol (\S+)', line)
+        if m:
+            fn,tn,pr = m.groups()
+            if fn not in acls: acls[fn]=_acl_new(fn)
+            _acl_upsert(acls[fn],tn,'protocol',pr.rstrip(';')); continue
+    mgmt = _mgmt_ip(ifaces)
+    return {'device':{'name':hostname,'hostname':hostname,'vendor':'Juniper','model':model,
+            'os':'JunOS','management_ip':mgmt or '0.0.0.0','device_type':_dtype(hostname,ifaces),
+            'tags':['junos','parsed']},
+            'interfaces':list(ifaces.values()),'acls':list(acls.values())}
 
+# --- Hierarchical format ---
+def _seg_val(path, kw):
+    """Find path segment starting with kw; return remainder or '' or None."""
+    for seg in path:
+        if seg == kw: return ''
+        if seg.startswith(kw + ' '): return seg[len(kw)+1:].strip()
+    return None
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Set-format parser
-# ──────────────────────────────────────────────────────────────────────────────
+def _hier_leaf(line, path, ifaces, acls):
+    line = line.rstrip(';').strip()
+    if not line: return
 
-def _parse_set(text: str, source_path: Path) -> dict:
-    """Parse a JunOS set-format configuration."""
-    result = {
-        "hostname": source_path.stem,
-        "vendor": "Juniper",
-        "os": "JunOS",
-        "device_type": "switch",
-        "version": "",
-        "model": "",
-        "interfaces": [],
-        "acls": [],
-        "bgp_peers": [],
-        "source_file": source_path.name,
-    }
+    if path and path[0] == 'interfaces' and len(path) >= 2:
+        base = path[1]
+        uv = _seg_val(path, 'unit')
+        key = (f'{base}.{uv}' if uv and uv != '0' else base)
+        _ensure(ifaces, key)
+        m = re.match(r'description\s+"?(.+?)"?\s*$', line)
+        if m: ifaces[key]['description'] = m.group(1).strip('"'); return
+        if line == 'disable': ifaces[key]['admin_status'] = 'disabled'; return
+        m = re.match(r'address\s+(\S+)$', line)
+        if m:
+            if _seg_val(path,'family inet') is not None:
+                ip,pl = _cidr(m.group(1)); ifaces[key]['ip_address']=ip
+                if pl: ifaces[key]['prefix_length']=pl
+                ifaces[key]['vlan_mode']='routed'
+            elif _seg_val(path,'family inet6') is not None:
+                if not ifaces[key].get('ip_address'):
+                    ip,pl = _cidr(m.group(1)); ifaces[key]['ip_address']=ip
+                    if pl: ifaces[key]['prefix_length']=pl
+            return
+        m = re.match(r'members\s+(\S+)$', line)
+        if m:
+            try:
+                vid = int(m.group(1))
+                if ifaces[key]['vlan_mode'] == 'trunk':
+                    if vid not in ifaces[key]['trunk_vlans']:
+                        ifaces[key]['trunk_vlans'].append(vid)
+                else:
+                    ifaces[key]['vlan_id'] = vid
+                    ifaces[key]['vlan_mode'] = 'access'
+            except: pass
+            return
+        m = re.match(r'interface-mode\s+(access|trunk)$', line)
+        if m: ifaces[key]['vlan_mode']=m.group(1); return
+        m = re.match(r'(input|output)\s+(\S+)$', line)
+        if m:
+            d,f = m.groups()
+            if d=='input': ifaces[key]['acl_in']=f
+            else: ifaces[key]['acl_out']=f
+            ifaces[key]['firewall_policy']=f; return
 
-    # Accumulate interface data keyed by physical interface name
-    iface_map: dict[str, dict] = {}  # e.g. "ge-0/0/0" → {...}
-    local_as: Optional[int] = None
+    if path and path[0] == 'firewall':
+        fn = _seg_val(path, 'filter')
+        if fn is None: return
+        if fn not in acls: acls[fn]=_acl_new(fn)
+        tn = _seg_val(path, 'term')
+        if tn is None: return
+        m = re.match(r'(accept|reject|discard)$', line)
+        if m:
+            _acl_upsert(acls[fn],tn,'action','permit' if m.group(1)=='accept' else 'deny'); return
+        m = re.match(r'source-address\s+(\S+)$', line)
+        if m: _acl_upsert(acls[fn],tn,'src_network',m.group(1)); return
+        m = re.match(r'destination-address\s+(\S+)$', line)
+        if m: _acl_upsert(acls[fn],tn,'dst_network',m.group(1)); return
+        m = re.match(r'protocol\s+(\S+)$', line)
+        if m: _acl_upsert(acls[fn],tn,'protocol',m.group(1)); return
+        m = re.match(r'destination-port\s+(\d+)$', line)
+        if m:
+            try: _acl_upsert(acls[fn],tn,'dst_port',int(m.group(1)))
+            except: pass
+            return
 
-    for raw_line in text.splitlines():
+def _parse_hier(raw, hostname):
+    ifaces, acls, path = {}, {}, []
+    raw = re.sub(r'/\*.*?\*/', '', raw, flags=re.DOTALL)
+    for raw_line in raw.splitlines():
         line = raw_line.strip()
-        if not line.startswith("set "):
+        if not line or line.startswith('#'):
+            m = re.match(r'host-name\s+(\S+)', line.lstrip('#').strip())
+            if m and hostname=='unknown': hostname=m.group(1).rstrip(';')
             continue
-        # Remove the leading "set "
-        stmt = line[4:]
-
-        # hostname
-        m = re.match(r"^system host-name\s+(\S+)", stmt)
-        if m:
-            result["hostname"] = m.group(1)
+        m = re.match(r'host-name\s+(\S+)', line)
+        if m and (not path or path == ['system']):
+            if hostname=='unknown': hostname=m.group(1).rstrip(';')
             continue
-
-        # interfaces
-        m = re.match(r"^interfaces\s+(\S+)\s+(.*)", stmt)
-        if m:
-            iface_name = m.group(1)
-            rest = m.group(2).strip()
-
-            # Skip unit-based subinterface naming — we track by physical name
-            # but strip "unit N" prefix from the rest
-            rest = re.sub(r"^unit\s+\d+\s+", "", rest)
-
-            if iface_name not in iface_map:
-                iface_map[iface_name] = _empty_iface(iface_name)
-
-            iface = iface_map[iface_name]
-
-            # description
-            desc_m = re.match(r"^description\s+\"?(.+?)\"?\s*$", rest)
-            if desc_m:
-                iface["description"] = desc_m.group(1)
-                continue
-
-            # disable
-            if rest.strip() == "disable":
-                iface["admin_status"] = "disabled"
-                continue
-
-            # IP address: family inet address x.x.x.x/y
-            addr_m = re.match(r"^family inet address\s+(\d+\.\d+\.\d+\.\d+)/(\d+)", rest)
-            if addr_m:
-                if iface["ip_address"] is None:
-                    iface["ip_address"] = addr_m.group(1)
-                    iface["prefix_length"] = int(addr_m.group(2))
-                continue
-
-            # Ethernet-switching mode
-            mode_m = re.match(r"^family ethernet-switching interface-mode\s+(trunk|access)", rest)
-            if mode_m:
-                iface["vlan_mode"] = mode_m.group(1)
-                continue
-
-            # VLAN members
-            vlan_m = re.match(r"^family ethernet-switching vlan members\s+(.+)", rest)
-            if vlan_m:
-                raw_vlan = vlan_m.group(1).strip()
-                vlans = _parse_junos_vlan_members(raw_vlan)
-                if vlans:
-                    if iface["vlan_mode"] == "access" and len(vlans) == 1 and not iface["trunk_vlans"]:
-                        iface["vlan_id"] = vlans[0]
-                    else:
-                        # Don't downgrade trunk mode to access when vlan members are parsed
-                        if iface["vlan_mode"] != "trunk":
-                            iface["vlan_mode"] = "trunk"
-                        iface["trunk_vlans"].extend(vlans)
-                continue
-
-        # BGP
-        m = re.match(r"^routing-options autonomous-system\s+(\d+)", stmt)
-        if m:
-            local_as = int(m.group(1))
+        opens, closes = line.count('{'), line.count('}')
+        if opens and not closes:
+            tok = line.rstrip('{').strip()
+            if tok: path.append(tok)
             continue
-
-        m = re.match(r"^protocols bgp group\s+\S+\s+neighbor\s+(\d+\.\d+\.\d+\.\d+)\s+peer-as\s+(\d+)", stmt)
-        if m and local_as:
-            result["bgp_peers"].append({
-                "peer_ip": m.group(1),
-                "local_as": local_as,
-                "remote_as": int(m.group(2)),
-            })
+        if closes and not opens:
+            for _ in range(closes):
+                if path: path.pop()
             continue
+        if opens and closes: continue
+        _hier_leaf(line, path, ifaces, acls)
+    model = 'JunOS Device'
+    m = re.search(r'Model:\s*(\S+)', raw, re.I)
+    if m: model = m.group(1)
+    mgmt = _mgmt_ip(ifaces)
+    return {'device':{'name':hostname,'hostname':hostname,'vendor':'Juniper','model':model,
+            'os':'JunOS','management_ip':mgmt or '0.0.0.0','device_type':_dtype(hostname,ifaces),
+            'tags':['junos','parsed']},
+            'interfaces':list(ifaces.values()),'acls':list(acls.values())}
 
-    # Determine device type
-    has_routing = bool(result["bgp_peers"]) or any(
-        i.get("ip_address") for i in iface_map.values()
-        if not re.match(r"^(lo|irb)", i["name"], re.IGNORECASE)
-    )
-    has_switching = any(i.get("vlan_mode") in ("trunk", "access") for i in iface_map.values())
-    if has_routing and not has_switching:
-        result["device_type"] = "router"
-    elif has_switching:
-        result["device_type"] = "switch"
-
-    result["interfaces"] = list(iface_map.values())
+# --- Public API ---
+def parse_junos(raw, hostname='unknown'):
+    """Parse a JunOS config string (set or hierarchical). Returns dict: device, interfaces, acls."""
+    fmt = _detect_format(raw)
+    log.info('JunOS format: %s  hostname_hint=%s', fmt, hostname)
+    result = _parse_set(raw, hostname) if fmt == 'set' else _parse_hier(raw, hostname)
+    log.info('Parsed %s: %d ifaces, %d acls', result['device']['name'],
+             len(result['interfaces']), len(result['acls']))
     return result
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Public entry point
-# ──────────────────────────────────────────────────────────────────────────────
-
-def parse_junos_config(text: str, source_path: Path) -> dict:
-    """
-    Auto-detect JunOS format and parse.
-
-    Returns the same schema as parsers.ios_config.parse_ios_running_config:
-    {hostname, vendor, os, device_type, version, model, interfaces, acls, bgp_peers, source_file}
-    """
-    if is_junos_set(text):
-        return _parse_set(text, source_path)
-    return _parse_hierarchical(text, source_path)

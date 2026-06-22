@@ -1,0 +1,62 @@
+! Dell EMC PowerSwitch OS10
+! Device: eqx-nyc-tor-01
+! Role: Top-of-Rack switch, EQX-NYC POP
+!
+hostname eqx-nyc-tor-01
+!
+! ─── Management ───────────────────────────────────────────────────
+interface mgmt1/1/1
+ no shutdown
+ ip address 10.99.1.3/24
+!
+! ─── Uplink to eqx-nyc-pe-01 (trunk, all service VLANs) ──────────
+interface ethernet1/1/1
+ description "Uplink to eqx-nyc-pe-01 ge-0/0/0"
+ no shutdown
+ switchport mode trunk
+ switchport trunk native vlan 1
+ switchport trunk allowed vlan 100,200,300
+!
+! ─── Uplink to eqx-nyc-sw-01 (inter-switch trunk) ────────────────
+interface ethernet1/1/2
+ description "ISL to eqx-nyc-sw-01 ge-0/0/1"
+ no shutdown
+ switchport mode trunk
+ switchport trunk allowed vlan 100,200,300
+!
+! ─── Server rack A — compute nodes (VLAN 100) ────────────────────
+interface ethernet1/1/3
+ description "Server rack-A port-1"
+ no shutdown
+ switchport mode access
+ switchport access vlan 100
+!
+interface ethernet1/1/4
+ description "Server rack-A port-2"
+ no shutdown
+ switchport mode access
+ switchport access vlan 100
+!
+! ─── Storage network (VLAN 200) ──────────────────────────────────
+interface ethernet1/1/5
+ description "NAS storage array"
+ no shutdown
+ switchport mode access
+ switchport access vlan 200
+!
+! ─── Disabled / spare ─────────────────────────────────────────────
+interface ethernet1/1/6
+ description "Spare — not in use"
+ shutdown
+!
+! ─── Loopback for BGP router-id ──────────────────────────────────
+interface loopback0
+ no shutdown
+ ip address 10.255.0.3/32
+!
+! ─── BGP (iBGP to PE router) ─────────────────────────────────────
+router bgp 65001
+ bgp router-id 10.255.0.3
+ neighbor 10.255.0.1 remote-as 65001
+ neighbor 10.255.0.1 description "iBGP to eqx-nyc-pe-01"
+!

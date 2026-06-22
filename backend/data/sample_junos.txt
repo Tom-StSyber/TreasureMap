@@ -1,0 +1,188 @@
+## Last commit: 2024-01-15 08:30:12 UTC by admin
+## Model: MX480
+## Junos: 22.4R1.10
+version 22.4R1.10;
+
+system {
+    host-name eqx-nyc-pe-01;
+    domain-name lab.local;
+    name-server {
+        8.8.8.8;
+        8.8.4.4;
+    }
+    login {
+        user admin {
+            class super-user;
+            authentication {
+                encrypted-password "$6$abc123";
+            }
+        }
+    }
+    services {
+        ssh {
+            root-login deny;
+        }
+        netconf {
+            ssh;
+        }
+    }
+    syslog {
+        host 10.0.255.10 {
+            any notice;
+        }
+    }
+    ntp {
+        server 10.0.0.1;
+    }
+}
+
+chassis {
+    fpc 0 {
+        pic 0 {
+            number-of-ports 4;
+        }
+    }
+}
+
+interfaces {
+    ge-0/0/0 {
+        description "UPLINK-TO-DRT-VA-BORDER-01-ge-0/0/0";
+        unit 0 {
+            family inet {
+                address 10.0.1.1/30;
+                filter {
+                    input INGRESS-FILTER;
+                    output EGRESS-FILTER;
+                }
+            }
+        }
+    }
+    ge-0/0/1 {
+        description "TRUNK-TO-EQX-NYC-SW-01";
+        unit 0 {
+            family ethernet-switching {
+                interface-mode trunk;
+                vlan {
+                    members 100;
+                    members 200;
+                }
+            }
+        }
+    }
+    ge-0/0/2 {
+        description "CORE-LINK-TO-EQX-NYC-CORE-01";
+        unit 0 {
+            family inet {
+                address 10.0.2.1/30;
+            }
+        }
+    }
+    ge-0/0/3 {
+        description "OOB-MGMT-LINK";
+        disable;
+        unit 0 {
+            family inet {
+                address 172.16.0.1/24;
+            }
+        }
+    }
+    lo0 {
+        unit 0 {
+            family inet {
+                address 10.255.0.1/32;
+            }
+        }
+    }
+    fxp0 {
+        description "MANAGEMENT";
+        unit 0 {
+            family inet {
+                address 192.168.1.1/24;
+            }
+        }
+    }
+}
+
+firewall {
+    family inet {
+        filter INGRESS-FILTER {
+            term ALLOW-ESTABLISHED {
+                from {
+                    protocol tcp;
+                    tcp-established;
+                }
+                then accept;
+            }
+            term ALLOW-SSH {
+                from {
+                    destination-address 10.255.0.1/32;
+                    protocol tcp;
+                    destination-port 22;
+                }
+                then accept;
+            }
+            term DENY-BOGONS {
+                from {
+                    source-address 10.0.0.0/8;
+                    source-address 172.16.0.0/12;
+                    source-address 192.168.0.0/16;
+                }
+                then {
+                    discard;
+                }
+            }
+            term DEFAULT-PERMIT {
+                then accept;
+            }
+        }
+        filter EGRESS-FILTER {
+            term ALLOW-ALL {
+                then accept;
+            }
+        }
+    }
+}
+
+routing-options {
+    autonomous-system 65001;
+    router-id 10.255.0.1;
+    static {
+        route 0.0.0.0/0 next-hop 10.0.1.2;
+    }
+}
+
+protocols {
+    bgp {
+        group EBGP-UPSTREAM {
+            type external;
+            neighbor 10.0.1.2 {
+                peer-as 65000;
+                description "UPSTREAM-PROVIDER";
+            }
+        }
+        group IBGP-CORE {
+            type internal;
+            neighbor 10.255.0.2;
+            neighbor 10.255.0.3;
+        }
+    }
+    ospf {
+        area 0.0.0.0 {
+            interface ge-0/0/2.0;
+            interface lo0.0 {
+                passive;
+            }
+        }
+    }
+}
+
+vlans {
+    VLAN100 {
+        vlan-id 100;
+        description "SERVER-LAN";
+    }
+    VLAN200 {
+        vlan-id 200;
+        description "MGMT-LAN";
+    }
+}

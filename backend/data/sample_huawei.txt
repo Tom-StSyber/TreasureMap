@@ -1,0 +1,91 @@
+#
+# board model CE6870EI
+# version VRP V200R002C50SPC800
+# current-configuration
+# last modification time 2024-01-15 10:00:00+00:00
+#
+sysname drt-va-sw-01
+#
+vlan batch 10 20 30 100 200
+#
+interface GigabitEthernet0/0/0
+ description UPLINK-TO-DRT-VA-PE-01-GE0/0/0
+ port link-type trunk
+ port trunk allow-pass vlan 10 20 30
+ port trunk pvid vlan 1
+#
+interface GigabitEthernet0/0/1
+ description TRUNK-TO-EQX-NYC-PE-01-GE0/0/2
+ port link-type trunk
+ port trunk allow-pass vlan 10 20
+ traffic-filter inbound acl 3000
+ traffic-filter outbound acl 3001
+#
+interface GigabitEthernet0/0/2
+ description SERVER-DRT-VA-APP-01
+ port link-type access
+ port default vlan 10
+#
+interface GigabitEthernet0/0/3
+ description SERVER-DRT-VA-DB-01
+ port link-type access
+ port default vlan 20
+#
+interface GigabitEthernet0/0/4
+ description OOB-CONSOLE-SERVER
+ port link-type access
+ port default vlan 200
+#
+interface GigabitEthernet0/0/5
+ description UNUSED
+ shutdown
+#
+interface Vlanif10
+ description APP-VLAN-GW
+ ip address 10.1.10.1 255.255.255.0
+#
+interface Vlanif20
+ description DB-VLAN-GW
+ ip address 10.1.20.1 255.255.255.0
+#
+interface Vlanif100
+ description MGMT-VLAN-GW
+ ip address 10.1.100.1 255.255.255.0
+#
+interface Vlanif200
+ description OOB-VLAN-GW
+ ip address 172.16.200.1 255.255.255.0
+#
+interface LoopBack0
+ description LOOPBACK
+ ip address 10.255.1.1 255.255.255.255
+#
+interface MEth0/0/0
+ description MANAGEMENT
+ ip address 192.168.2.1 255.255.255.0
+#
+acl number 3000
+ rule 10 permit tcp source 10.1.100.0 0.0.0.255 destination any destination-port eq 22
+ rule 20 permit tcp source 10.1.100.0 0.0.0.255 destination any destination-port eq 443
+ rule 30 permit icmp source any destination any
+ rule 40 deny ip source any destination any
+#
+acl number 3001
+ rule 10 permit ip source any destination any
+#
+acl name MGMT-ACCESS
+ rule 5 permit tcp source 172.16.0.0 0.0.255.255 destination any destination-port eq 22
+ rule 10 permit tcp source 172.16.0.0 0.0.255.255 destination any destination-port eq 23
+ rule 100 deny ip source any destination any
+#
+ospf 1 router-id 10.255.1.1
+ area 0.0.0.0
+  network 10.1.10.0 0.0.0.255
+  network 10.1.20.0 0.0.0.255
+  network 10.255.1.1 0.0.0.0
+#
+ip route-static 0.0.0.0 0.0.0.0 10.1.100.254
+#
+ntp-service unicast-server 10.0.0.1
+#
+return

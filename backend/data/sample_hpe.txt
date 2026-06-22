@@ -1,0 +1,73 @@
+! HPE Aruba OS-CX
+! Device: drt-va-agg-01
+! Role: Aggregation switch, DRT-VA POP
+!
+hostname drt-va-agg-01
+!
+! ─── Management VRF ───────────────────────────────────────────────
+vrf mgmt
+!
+ssh server vrf mgmt
+ntp server pool.ntp.org vrf mgmt
+!
+! ─── Management port ──────────────────────────────────────────────
+interface mgmt
+    no shutdown
+    vrf attach mgmt
+    ip address 10.99.2.10/24
+!
+! ─── Uplink to drt-va-sw-01 (Huawei) — trunk ─────────────────────
+interface 1/1/1
+    no shutdown
+    description "Uplink to drt-va-sw-01 GE0/0/1"
+    vlan trunk native 1
+    vlan trunk allowed 10,20,30
+!
+! ─── Uplink to drt-va-pe-01 (routed P2P) ─────────────────────────
+interface 1/1/2
+    no shutdown
+    description "P2P to drt-va-pe-01"
+    ip address 10.0.3.2/30
+!
+! ─── Server access — VLAN 10 (web tier) ──────────────────────────
+interface 1/1/3
+    no shutdown
+    description "Web server cluster"
+    vlan access 10
+!
+! ─── Server access — VLAN 20 (app tier) ──────────────────────────
+interface 1/1/4
+    no shutdown
+    description "App server cluster"
+    vlan access 20
+!
+! ─── Storage — VLAN 30 ────────────────────────────────────────────
+interface 1/1/5
+    no shutdown
+    description "Storage fabric"
+    vlan access 30
+!
+! ─── Disabled ─────────────────────────────────────────────────────
+interface 1/1/6
+    shutdown
+    description "Spare"
+!
+! ─── SVI — routed VLAN 10 gateway ────────────────────────────────
+interface vlan10
+    no shutdown
+    ip address 10.10.10.1/24
+    description "Web tier gateway"
+!
+! ─── Loopback for BGP router-id ──────────────────────────────────
+interface loopback0
+    no shutdown
+    ip address 10.255.1.10/32
+!
+! ─── BGP (iBGP to drt-va-pe-01, iBGP to drt-va-sw-01) ───────────
+router bgp 65002
+    bgp router-id 10.255.1.10
+    neighbor 10.0.3.1 remote-as 65002
+    neighbor 10.0.3.1 description "iBGP to drt-va-pe-01"
+    neighbor 10.255.0.2 remote-as 65002
+    neighbor 10.255.0.2 description "iBGP to drt-va-sw-01 loopback"
+!

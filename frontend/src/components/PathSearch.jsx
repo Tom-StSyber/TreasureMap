@@ -115,7 +115,7 @@ function SuggestInput({ value, onChange, placeholder, id }) {
   )
 }
 
-export default function PathSearch({ onResult, onClear, prefillSource }) {
+export default function PathSearch({ onResult, onClear, prefillSource, onPrefillConsumed }) {
   const [src, setSrc]       = useState('')
   const [dst, setDst]       = useState('')
   const [proto, setProto]   = useState('')
@@ -125,15 +125,13 @@ export default function PathSearch({ onResult, onClear, prefillSource }) {
   const [loading, setLoading] = useState(false)
   const [error, setError]   = useState(null)
 
-  // Pre-fill source when triggered by right-click context menu
+  // When App passes a prefillSource (from right-click context menu), apply it once
   useEffect(() => {
     if (prefillSource) {
       setSrc(prefillSource)
-      setResult(null)
-      setError(null)
-      onClear?.()
+      onPrefillConsumed?.()
     }
-  }, [prefillSource]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [prefillSource, onPrefillConsumed])
 
   const submit = useCallback(async (e) => {
     e.preventDefault()
