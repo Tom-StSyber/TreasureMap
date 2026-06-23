@@ -101,17 +101,17 @@ const STYLESHEET = [
     },
   },
 
-  // Device-type icons (PNG) + fallback colour for types without an icon
+  // Device-type icons (PNG) — Cytoscape programmatic API needs raw URL, no url() wrapper
   { selector: '.node-router',
-    style: { 'background-image': 'url(/icons/router.png)', 'background-opacity': 0 } },
+    style: { 'background-image': `${window.location.origin}/icons/router.png`, 'background-opacity': 0 } },
   { selector: '.node-switch',
-    style: { 'background-image': 'url(/icons/switch.png)', 'background-opacity': 0 } },
+    style: { 'background-image': `${window.location.origin}/icons/switch.png`, 'background-opacity': 0 } },
   { selector: '.node-firewall',
-    style: { 'background-image': 'url(/icons/firewall.png)', 'background-opacity': 0 } },
+    style: { 'background-image': `${window.location.origin}/icons/firewall.png`, 'background-opacity': 0 } },
   { selector: '.node-server',
-    style: { 'background-image': 'url(/icons/server.png)', 'background-opacity': 0 } },
+    style: { 'background-image': `${window.location.origin}/icons/server.png`, 'background-opacity': 0 } },
   { selector: '.node-host',
-    style: { 'background-image': 'url(/icons/host.png)', 'background-opacity': 0 } },
+    style: { 'background-image': `${window.location.origin}/icons/host.png`, 'background-opacity': 0 } },
   // Cloud/internet — no icon file, keep coloured shape
   { selector: '.node-cloud',
     style: { 'background-color': '#164e63', 'background-opacity': 1,
