@@ -272,6 +272,7 @@ export default function TopologyGraph({
       boxSelectionEnabled: false,
       minZoom: 0.05,
       maxZoom: 4,
+      wheelSensitivity: 0.1,
     })
 
     // Left-click → select node/edge
