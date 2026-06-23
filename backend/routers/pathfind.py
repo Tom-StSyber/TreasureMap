@@ -171,17 +171,18 @@ def _resolve_name(es, query: str) -> str:
     if hits["hits"]["hits"]:
         return hits["hits"]["hits"][0]["_source"]["name"]
 
-    # Try management IP
-    hits = es.search(index=IDX_DEVICES,
-                     body={"query": {"term": {"management_ip": q}}, "size": 1})
-    if hits["hits"]["hits"]:
-        return hits["hits"]["hits"][0]["_source"]["name"]
+    # Try management IP / interface IP (only when q is a valid IP address —
+    # both fields are ES type "ip" and reject non-IP strings with a parse error)
+    if _is_ip(q):
+        hits = es.search(index=IDX_DEVICES,
+                         body={"query": {"term": {"management_ip": q}}, "size": 1})
+        if hits["hits"]["hits"]:
+            return hits["hits"]["hits"][0]["_source"]["name"]
 
-    # Try interface IP
-    hits = es.search(index=IDX_INTERFACES,
-                     body={"query": {"term": {"ip_address": q}}, "size": 1})
-    if hits["hits"]["hits"]:
-        return hits["hits"]["hits"][0]["_source"]["device_name"]
+        hits = es.search(index=IDX_INTERFACES,
+                         body={"query": {"term": {"ip_address": q}}, "size": 1})
+        if hits["hits"]["hits"]:
+            return hits["hits"]["hits"][0]["_source"]["device_name"]
 
     raise HTTPException(status_code=404, detail=f"Cannot resolve '{query}' to a known device")
 
