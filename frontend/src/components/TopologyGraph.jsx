@@ -84,28 +84,38 @@ const STYLESHEET = [
     selector: 'node:childless',   // only leaf (device) nodes get this
     style: {
       'background-color':  '#1e293b',
-      'border-width':      2,
-      'border-color':      '#475569',
+      'background-opacity': 0,
+      'border-width':      0,
       'label':             'data(label)',
       'color':             '#e2e8f0',
       'font-size':         11,
       'text-valign':       'bottom',
       'text-halign':       'center',
-      'text-margin-y':     4,
-      'width':             48,
-      'height':            48,
+      'text-margin-y':     6,
+      'width':             64,
+      'height':            64,
       'text-wrap':         'wrap',
-      'text-max-width':    90,
+      'text-max-width':    100,
+      'background-fit':    'contain',
+      'background-clip':   'none',
     },
   },
 
-  // Device-type colours
-  { selector: '.node-router',   style: { 'background-color': '#1d4ed8', 'border-color': '#60a5fa' } },
-  { selector: '.node-switch',   style: { 'background-color': '#065f46', 'border-color': '#34d399' } },
-  { selector: '.node-firewall', style: { 'background-color': '#7c2d12', 'border-color': '#fb923c' } },
-  { selector: '.node-server',   style: { 'background-color': '#1e1b4b', 'border-color': '#a78bfa' } },
-  { selector: '.node-host',     style: { 'background-color': '#1e1b4b', 'border-color': '#c4b5fd' } },
-  { selector: '.node-cloud',    style: { 'background-color': '#164e63', 'border-color': '#38bdf8' } },
+  // Device-type icons (PNG) + fallback colour for types without an icon
+  { selector: '.node-router',
+    style: { 'background-image': 'url(/icons/router.png)', 'background-opacity': 0 } },
+  { selector: '.node-switch',
+    style: { 'background-image': 'url(/icons/switch.png)', 'background-opacity': 0 } },
+  { selector: '.node-firewall',
+    style: { 'background-image': 'url(/icons/firewall.png)', 'background-opacity': 0 } },
+  { selector: '.node-server',
+    style: { 'background-image': 'url(/icons/server.png)', 'background-opacity': 0 } },
+  { selector: '.node-host',
+    style: { 'background-image': 'url(/icons/host.png)', 'background-opacity': 0 } },
+  // Cloud/internet — no icon file, keep coloured shape
+  { selector: '.node-cloud',
+    style: { 'background-color': '#164e63', 'background-opacity': 1,
+             'border-width': 2, 'border-color': '#38bdf8' } },
 
   // ── Role overlays ───────────────────────────────────────────
   // Gateway — gold star border, larger, bold label
@@ -176,7 +186,8 @@ const STYLESHEET = [
 
   // Selected
   { selector: 'node:childless:selected',
-    style: { 'border-color': '#f59e0b', 'border-width': 3 } },
+    style: { 'border-color': '#f59e0b', 'border-width': 3, 'background-opacity': 0.15,
+             'background-color': '#f59e0b' } },
 ]
 
 // ─── Context menu ─────────────────────────────────────────────────
