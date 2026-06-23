@@ -361,6 +361,7 @@ export default function App() {
   const [showIngest,   setShowIngest]   = useState(false)
   const [popModal,     setPopModal]     = useState(null)   // { nodeData } | null
   const [pops,         setPops]         = useState([])     // known POP labels
+  const [discoverStatus, setDiscoverStatus] = useState(null) // null | 'running' | {result} | {error}
   // For path query pre-fill from context menu
   const [pathSource,   setPathSource]   = useState(null)
 
@@ -398,6 +399,23 @@ export default function App() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  const handleDiscover = useCallback(async () => {
+    setDiscoverStatus('running')
+    try {
+      const res = await fetch('/api/ingest/discover-connections', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.detail || res.statusText)
+      setDiscoverStatus({ result: json })
+      // Refresh topology so new connections appear immediately
+      await load()
+      // Auto-clear the notification after 8 seconds
+      setTimeout(() => setDiscoverStatus(null), 8000)
+    } catch (e) {
+      setDiscoverStatus({ error: e.message })
+      setTimeout(() => setDiscoverStatus(null), 6000)
+    }
+  }, [load])
 
   // Handle right-click "Path Query from here" — switch to pathfind tab and pre-fill
   const handlePathQueryFrom = useCallback(nodeData => {
@@ -448,9 +466,52 @@ export default function App() {
         <button style={S.ingestBtn} onClick={() => setShowIngest(v => !v)}>
           📂 Ingest
         </button>
+        <button
+          style={{
+            ...S.ingestBtn,
+            borderColor: '#065f46', background: '#064e3b', color: '#6ee7b7',
+            opacity: discoverStatus === 'running' ? 0.6 : 1,
+          }}
+          onClick={handleDiscover}
+          disabled={discoverStatus === 'running'}
+          title="Auto-detect connections between devices using subnet matching and interface descriptions"
+        >
+          {discoverStatus === 'running' ? '⟳ Discovering…' : '🔗 Discover'}
+        </button>
         <button style={S.refreshBtn} onClick={load} disabled={loading}>
           {loading ? '⟳ Loading…' : '⟳ Refresh'}
         </button>
+
+        {/* Discovery result notification */}
+        {discoverStatus && discoverStatus !== 'running' && (
+          <div style={{
+            position: 'fixed', bottom: 40, right: 24, zIndex: 2000,
+            background: discoverStatus.error ? '#450a0a' : '#052e16',
+            border: `1px solid ${discoverStatus.error ? '#991b1b' : '#166534'}`,
+            borderRadius: 10, padding: '14px 18px', color: '#e2e8f0',
+            fontSize: 13, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            minWidth: 280,
+          }}>
+            {discoverStatus.error ? (
+              <div style={{ color: '#fca5a5' }}>⚠ Discovery failed: {discoverStatus.error}</div>
+            ) : (
+              <>
+                <div style={{ fontWeight: 700, color: '#6ee7b7', marginBottom: 6 }}>
+                  🔗 Connection Discovery Complete
+                </div>
+                <div>Found: <b>{discoverStatus.result.discovered}</b> new connections</div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                  subnet: {discoverStatus.result.by_method?.subnet ?? 0} ·
+                  description: {discoverStatus.result.by_method?.description ?? 0} ·
+                  cdp/lldp: {discoverStatus.result.by_method?.cdp_lldp ?? 0}
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                  Total connections in topology: {discoverStatus.result.total}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </header>
 
       {/* ── Body ───────────────────────────────────────────── */}

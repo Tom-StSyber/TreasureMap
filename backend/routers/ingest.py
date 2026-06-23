@@ -218,6 +218,32 @@ def list_pops():
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Connection discovery
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/discover-connections")
+def discover_connections():
+    """
+    Run the automatic connection discovery engine against all devices and
+    interfaces currently in Elasticsearch.
+
+    Three strategies are applied in order:
+      1. subnet    — interface pairs sharing a /29-/31 subnet
+      2. description — interface descriptions that name a known device
+      3. cdp_lldp  — CDP/LLDP neighbor blocks embedded in config exports
+
+    Returns counts of connections found, written, and skipped (duplicates).
+    """
+    from connection_discovery import discover_connections as _discover
+    try:
+        result = _discover()
+        return result
+    except Exception as exc:
+        log.exception("Connection discovery failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
