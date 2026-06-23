@@ -79,3 +79,4 @@ frontend/public/icons/*.jpg
 frontend/public/icons/*.jpeg
 frontend/public/icons/Icon_Cache.db
 frontend/public/icons/test.txt
+frontend/package-lock.json
