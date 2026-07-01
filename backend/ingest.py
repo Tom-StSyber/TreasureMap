@@ -4,7 +4,7 @@ TreasureMap — Data ingest script.
 Modes:
   python ingest.py                    # load built-in sample network data
   python ingest.py --samples          # also parse sample Juniper/Huawei configs
-  python ingest.py --config-dir PATH  # parse all .txt/.conf/.cfg files in PATH
+  python ingest.py --config-dir PATH  # parse all .txt/.conf/.cfg/.log/.config files in PATH
   python ingest.py --no-wipe          # append without dropping existing indices
 
 Run from the backend/ directory.
@@ -143,7 +143,7 @@ def _load_sample_configs(es, IDX_DEVICES, IDX_INTERFACES, IDX_ACLS):
 
 
 def _load_config_dir(es, config_dir: str, IDX_DEVICES, IDX_INTERFACES, IDX_ACLS):
-    exts = {".txt", ".conf", ".cfg", ".log"}
+    exts = {".txt", ".conf", ".cfg", ".log", ".config"}
     count = 0
     for fname in sorted(os.listdir(config_dir)):
         if not any(fname.endswith(e) for e in exts):

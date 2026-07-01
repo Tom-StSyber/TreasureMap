@@ -134,12 +134,12 @@ function IngestPanel({ onIngested, onClose }) {
   // ── Bulk upload (folder or multi-file) ─────────────────────────
   async function handleBulkUpload() {
     if (!bulkFiles.length) return
-    const accepted = ['.txt', '.conf', '.cfg', '.log']
+    const accepted = ['.txt', '.conf', '.cfg', '.log', '.config']
     const toUpload = bulkFiles.filter(f =>
       accepted.some(ext => f.name.toLowerCase().endsWith(ext))
     )
     if (!toUpload.length) {
-      setBulkProgress({ done: 0, total: 0, results: [], error: 'No supported files found (.txt .conf .cfg .log)' })
+      setBulkProgress({ done: 0, total: 0, results: [], error: 'No supported files found (.txt .conf .cfg .log .config)' })
       return
     }
 
@@ -210,7 +210,7 @@ function IngestPanel({ onIngested, onClose }) {
       {mode === 'single' && (
         <>
           <label style={{ display: 'block', marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>Config file</label>
-          <input type="file" ref={fileRef} accept=".txt,.conf,.cfg,.log"
+          <input type="file" ref={fileRef} accept=".txt,.conf,.cfg,.log,.config"
             onChange={e => { setFile(e.target.files[0]); setStatus(null) }}
             style={{ ...inp, padding: '4px 6px' }} />
 
@@ -285,7 +285,7 @@ function IngestPanel({ onIngested, onClose }) {
           <input
             type="file"
             multiple
-            accept=".txt,.conf,.cfg,.log"
+            accept=".txt,.conf,.cfg,.log,.config"
             style={{ ...inp, padding: '4px 6px' }}
             onChange={e => { setBulkFiles(Array.from(e.target.files)); setBulkProgress(null) }}
           />
