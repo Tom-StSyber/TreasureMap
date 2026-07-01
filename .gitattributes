@@ -1,0 +1,17 @@
+# Normalize line endings so Windows (core.autocrlf) settings can't cause
+# spurious whole-file diffs like the one we just chased down.
+#
+# Default: treat everything as text, normalize to LF in the repo.
+* text=auto eol=lf
+
+# Windows-native scripts should keep CRLF — that's what they're meant to run with.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files — never touch line endings.
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.gif  binary
+*.ico  binary
+*.eps  binary
