@@ -362,6 +362,7 @@ export default function App() {
   const [popModal,     setPopModal]     = useState(null)   // { nodeData } | null
   const [pops,         setPops]         = useState([])     // known POP labels
   const [discoverStatus, setDiscoverStatus] = useState(null) // null | 'running' | {result} | {error}
+  const [wipeStatus,   setWipeStatus]   = useState(null) // null | 'running' | {ok} | {error}
   // For path query pre-fill from context menu
   const [pathSource,   setPathSource]   = useState(null)
 
@@ -414,6 +415,31 @@ export default function App() {
     } catch (e) {
       setDiscoverStatus({ error: e.message })
       setTimeout(() => setDiscoverStatus(null), 6000)
+    }
+  }, [load])
+
+  const handleClearMap = useCallback(async () => {
+    const ok = window.confirm(
+      'Clear the entire map?\n\n' +
+      'This permanently deletes ALL devices, interfaces, connections, and ACLs ' +
+      'currently ingested. This cannot be undone — you would need to re-import ' +
+      'your config files from scratch.'
+    )
+    if (!ok) return
+
+    setWipeStatus('running')
+    try {
+      const res = await fetch('/api/ingest/wipe', { method: 'DELETE' })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.detail || res.statusText)
+      setWipeStatus({ ok: true })
+      // Clear any stale selections pointing at now-deleted data
+      setSelectedNode(null); setSelectedEdge(null); setPathResult(null)
+      await load()
+      setTimeout(() => setWipeStatus(null), 5000)
+    } catch (e) {
+      setWipeStatus({ error: e.message })
+      setTimeout(() => setWipeStatus(null), 6000)
     }
   }, [load])
 
@@ -481,6 +507,36 @@ export default function App() {
         <button style={S.refreshBtn} onClick={load} disabled={loading}>
           {loading ? '⟳ Loading…' : '⟳ Refresh'}
         </button>
+        <button
+          style={{
+            ...S.refreshBtn,
+            borderColor: '#7f1d1d', background: '#450a0a', color: '#fca5a5',
+            opacity: wipeStatus === 'running' ? 0.6 : 1,
+          }}
+          onClick={handleClearMap}
+          disabled={wipeStatus === 'running'}
+          title="Delete all devices, interfaces, connections, and ACLs — start over before importing a new set of configs"
+        >
+          {wipeStatus === 'running' ? '⟳ Clearing…' : '🗑 Clear Map'}
+        </button>
+
+        {/* Clear-map result notification */}
+        {wipeStatus && wipeStatus !== 'running' && (
+          <div style={{
+            position: 'fixed', bottom: 40, right: 24, zIndex: 2000,
+            background: wipeStatus.error ? '#450a0a' : '#052e16',
+            border: `1px solid ${wipeStatus.error ? '#991b1b' : '#166534'}`,
+            borderRadius: 10, padding: '14px 18px', color: '#e2e8f0',
+            fontSize: 13, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            minWidth: 280,
+          }}>
+            {wipeStatus.error ? (
+              <div style={{ color: '#fca5a5' }}>⚠ Clear failed: {wipeStatus.error}</div>
+            ) : (
+              <div style={{ color: '#6ee7b7' }}>🗑 Map cleared — all devices, interfaces, connections, and ACLs deleted.</div>
+            )}
+          </div>
+        )}
 
         {/* Discovery result notification */}
         {discoverStatus && discoverStatus !== 'running' && (

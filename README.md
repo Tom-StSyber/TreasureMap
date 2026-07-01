@@ -2,7 +2,7 @@
 
 **Multi-vendor network topology visualiser — from configs to interactive graph in minutes.**
 
-TreasureMap ingests running-configuration files from network devices, parses them into a structured graph, stores the data in Elasticsearch, and renders an interactive topology diagram in the browser. It detects BGP peers, shared /30 subnets, interface-description cross-links, VLANs, and ACLs — building a complete picture of your network with no agents, no SNMP, and no proprietary collectors.
+TreasureMap ingests running-configuration files from network devices, parses them into a structured graph, stores the data in Elasticsearch, and renders an interactive topology diagram in the browser. A one-click **Discover** pass infers the links between devices from shared IP subnets, interface descriptions, and CDP/LLDP neighbor data, while parsing also picks up VLANs and ACLs — building a complete picture of your network with no agents, no SNMP, and no proprietary collectors.
 
 ![TreasureMap topology overview](https://github.com/user-attachments/assets/ab5bb19a-e9a4-482d-9397-a57f5d9b3a15)
 ![TreasureMap path-query overview](https://github.com/user-attachments/assets/8e40c496-9e0f-41de-9c30-0f901c2ed368)
@@ -10,15 +10,15 @@ TreasureMap ingests running-configuration files from network devices, parses the
 
 ## Supported Vendors
 
-| Vendor | Platform | Parser |
-|--------|----------|--------|
-| Cisco | IOS / IOS-XE / NX-OS / ASA | `parsers/ios_config.py` |
-| Juniper | JunOS (hierarchical and set-format) | `parsers/juniper.py` |
-| Huawei | VRP V2 / V5 / V8 | `parsers/huawei.py` |
-| Dell | OS10 / Enterprise SONiC (PowerSwitch) | `parsers/dell.py` |
-| HPE | Aruba OS-CX | `parsers/hpe.py` |
+| Vendor | Platform | Parser | Status |
+|--------|----------|--------|--------|
+| Cisco | IOS / IOS-XE / NX-OS | `parsers/cisco.py` | ✅ Wired in |
+| Juniper | JunOS (hierarchical and set-format) | `parsers/juniper.py` | ✅ Wired in |
+| Huawei | VRP | `parsers/huawei.py` | ✅ Wired in |
+| Dell | OS10 / Enterprise SONiC (PowerSwitch) | `parsers/dell.py` | 🚧 Parser written, not yet connected to the ingest pipeline (its output schema doesn't match `Device`/`Interface`/`Acl` yet — needs adapting, plus ACL-rule extraction) |
+| HPE | Aruba OS-CX | `parsers/hpe.py` | 🚧 Same as Dell — file exists, not wired in |
 
-Auto-detect is the default. You can also specify the vendor explicitly when uploading a single file via the UI.
+Auto-detect is the default (`_detect_vendor` in `routers/ingest.py`). It also fingerprints Extreme EXOS and Nokia SR-OS, but there's no parser for either yet — those currently fall through to the Cisco parser, which will not produce useful output. Only pick Cisco/Juniper/Huawei as an explicit vendor hint for now.
 
 ---
 
@@ -61,32 +61,47 @@ docker compose ps
 
 ### 3  Ingest sample configs (included in the repo)
 
-Open http://localhost:3000, click **⚙ Ingest**, choose **Folder Scan**, and enter:
+Open http://localhost:3000 and click **📂 Ingest Config Files**. There are two tabs:
 
-```
-/app/data
-```
+- **Single File** — pick one config, optionally override the hostname or vendor, click **Upload & Parse**.
+- **Folder / Multiple** — either use the folder picker (browser-native, requires a Chromium-based browser for the `webkitdirectory` folder select) or select several files individually. Every matching file is POSTed one at a time to the backend with a live per-file progress bar.
 
-This scans `backend/data/` (mounted into the container), which contains sample configs for all five supported vendors. Click **▶ Start Ingest**.
+Supported extensions in the picker: **`.txt`, `.conf`, `.cfg`, `.log`, `.config`**.
+
+To load the bundled sample data, use the folder picker on `backend/data/` (mounted at `/app/data` in the container, but the picker reads from your host filesystem, so point it at the repo's `backend/data/` folder directly) — it contains sample Juniper and Huawei configs, plus the built-in synthetic sample network is loaded automatically the first time the API starts.
+
+> **Note:** There's also a more advanced ingest UI (`frontend/src/components/IngestModal.jsx`) with drag-and-drop, a server-side "Folder Scan" path input, and SSE-driven live progress — but it isn't wired up yet. It posts to `/api/ingest/upload` and `/api/ingest/stream`, neither of which exist in `routers/ingest.py`, and `App.jsx` doesn't import it. Treat it as an in-progress redesign, not the current UI.
 
 ### 4  Ingest your own configs
 
-**Option A — Upload File** (single device, any vendor):
-1. Click **⚙ Ingest → Upload File**
-2. Drop your `.cfg` / `.conf` / `.txt` file
-3. Select a vendor hint or leave it as Auto-detect
-4. Click **⬆ Upload & Parse**
+Same **📂 Ingest Config Files** panel as above — either upload a single file or select/drop multiple files (`.txt`, `.conf`, `.cfg`, `.log`, `.config`). Vendor is auto-detected from file content unless you override it.
 
-**Option B — Folder Scan** (batch, one folder at a time):
-1. Copy your config files into `backend/data/` on the Docker host (or mount a different path — see [Volume Mounts](#volume-mounts) below)
-2. Click **⚙ Ingest → Folder Scan** and enter the path inside the container
+Ingest always **upserts** by device name — it merges new devices into whatever's already in Elasticsearch rather than replacing it. If you want to start over with a clean map instead of merging (e.g. importing a different network's configs), click **🗑 Clear Map** in the top toolbar first. It asks for confirmation, then deletes every device, interface, connection, and ACL currently indexed — this is irreversible, there's no undo, so re-ingest from your original files if you clear the wrong thing.
 
-### 5  Explore the topology
+For bulk loading from the command line instead of the browser (useful for large batches or scripting), run inside the API container or a local Python env:
 
-- **Click** any node to see device details (vendor, OS, interfaces, ACLs, BGP peers)
+```bash
+python ingest.py --config-dir /path/to/configs
+```
+
+This scans the given directory for the same five extensions and ingests everything it finds.
+
+### 5  Discover connections
+
+Devices and interfaces alone don't give you a topology — you need the links between them. Click **🔗 Discover** in the top toolbar to run the connection-discovery engine (`backend/connection_discovery.py`) against everything currently in Elasticsearch. It runs three strategies, in order of confidence, and never overwrites or duplicates an existing connection:
+
+1. **Subnet matching** — interface pairs sharing an IP subnet of `/29` or smaller (i.e. `/29`–`/31`) are inferred as a point-to-point link. Highest confidence, no manual input needed.
+2. **Description matching** — scans interface descriptions for text naming another known device (`"uplink to sw-dist-01 Gi0/1"`, `"link → fw-01"`, etc.), including recognizing abbreviated interface names (`Gi`, `Te`, `Fa`, Juniper `ge-`/`xe-`, and bare `slot/port` forms).
+3. **CDP/LLDP parsing** — if your config export includes `show cdp neighbors detail` or `show lldp neighbors detail` output appended to the file, this strategy parses it directly for neighbor device, local interface, and remote port. Highest confidence of the three, but only runs if that output is present.
+
+The result notification shows how many new connections were found, broken down by strategy, and the running total in the topology. Re-running Discover after ingesting more devices is safe — it only adds connections it hasn't seen before.
+
+### 6  Explore the topology
+
+- **Click** any node to see device details (vendor, OS, interfaces, ACLs)
 - **Right-click** a node to start a path-find query or assign it to a POP
 - **Click** an edge to see link details (type, VLANs, ACL status)
-- Use the **Path Search** panel to trace a route between any two devices
+- Use the **Path Search** panel (with fuzzy autocomplete via `/pathfind/search`) to trace a route between any two devices, IPs, or "internet", and check whether a specific protocol/port is authorized along the way
 
 ---
 
@@ -142,26 +157,29 @@ docker compose up -d --build
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Browser (React + Cytoscape.js)                    localhost:3000    │
 │  ┌────────────────────────────────────────────────────────────────┐  │
-│  │  Topology graph │  Device detail │  Path-find │  Ingest UI     │  │
+│  │  Topology graph │ Device detail │ Path search │ Ingest panel  │  │
+│  │                          │ 🔗 Discover button                 │  │
 │  └────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────┬─────────────────────────────────────────┘
-                             │ HTTP / SSE  (Nginx proxy → :8000)
+                             │ HTTP  (Nginx proxy → :8000)
 ┌────────────────────────────▼─────────────────────────────────────────┐
 │  FastAPI + Uvicorn                                 localhost:8000    │
-│  ┌─────────────┐  ┌──────────────────┐  ┌───────────────────────┐   │
-│  │ /topology   │  │ /ingest/stream   │  │ /pathfind             │   │
-│  │ /devices    │  │  (SSE batch)     │  │ (NetworkX BFS)        │   │
-│  └─────────────┘  └────────┬─────────┘  └───────────────────────┘   │
-│                             │ _dispatch_parser()                      │
+│  ┌─────────────┐ ┌────────────────────┐ ┌────────────────────────┐  │
+│  │ /topology   │ │ /ingest/config     │ │ /pathfind              │  │
+│  │ /devices    │ │ /ingest/discover-  │ │ /pathfind/search       │  │
+│  │             │ │  connections       │ │ (NetworkX-free BFS)    │  │
+│  │             │ │ /ingest/wipe (DEL) │ │                        │  │
+│  └─────────────┘ └─────────┬──────────┘ └────────────────────────┘  │
+│                             │ _parse_config()                        │
 │  ┌──────────────────────────▼────────────────────────────────────┐   │
 │  │  Parser dispatcher  (routers/ingest.py)                       │   │
 │  │  ┌──────────────┐ ┌──────────────┐ ┌──────────┐              │   │
-│  │  │ ios_config   │ │  juniper     │ │  huawei  │              │   │
+│  │  │ cisco        │ │  juniper     │ │  huawei  │  ← wired in  │   │
 │  │  └──────────────┘ └──────────────┘ └──────────┘              │   │
-│  │  ┌──────────────┐ ┌──────────────┐                           │   │
-│  │  │ dell (OS10)  │ │ hpe (OS-CX)  │  ← auto-detect or hint   │   │
-│  │  └──────────────┘ └──────────────┘                           │   │
+│  │  dell.py / hpe.py exist but are not connected yet             │   │
 │  └───────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  connection_discovery.py — subnet / description / CDP-LLDP matching   │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │ Elasticsearch Python client
 ┌────────────────────────────▼─────────────────────────────────────────┐
@@ -174,13 +192,13 @@ docker compose up -d --build
 
 ## Features
 
-- **Five vendor parsers** — Cisco IOS/IOS-XE/NX-OS/ASA, Juniper JunOS (hierarchical + set-format), Huawei VRP, Dell OS10, HPE Aruba OS-CX
-- **Auto-detect** — vendor/OS detected from config fingerprints; explicit hint overrides
-- **Automatic connection detection** — BGP peers, shared /30 subnets, interface-description cross-links
+- **Three vendor parsers wired in** — Cisco IOS/IOS-XE/NX-OS, Juniper JunOS (hierarchical + set-format), Huawei VRP. Dell OS10 and HPE Aruba OS-CX parsers exist in `backend/parsers/` but aren't connected to the ingest pipeline yet.
+- **Auto-detect** — vendor detected from config fingerprints (`routers/ingest.py::_detect_vendor`); explicit hint overrides. Extreme and Nokia are fingerprinted but have no parser yet.
+- **🔗 Discover — connection discovery** — one click runs three strategies against everything in Elasticsearch: IP subnet matching (`/29`–`/31`), interface-description text matching, and CDP/LLDP neighbor-block parsing. Deduplicates against existing connections; safe to re-run. See [step 5](#5--discover-connections) above for details.
 - **ACL visualisation** — extended ACL rules with source/dest/port/action breakdown
-- **Path-finding** — BFS shortest-path between any two devices with ACL evaluation
+- **Path-finding with authorization check** — BFS shortest-path between any two devices, IPs, or "internet", evaluating ACL/firewall rules hop-by-hop to return a PERMIT/DENY verdict for a given protocol and port. Fuzzy autocomplete via `/pathfind/search`.
 - **POP detection** — `{site}-{loc}-{role}-{seq}` hostname convention auto-assigns Point of Presence and role
-- **Live ingest stream** — Server-Sent Events feed shows per-file parsing progress in real time
+- **🗑 Clear Map** — one click (with a confirmation prompt) wipes all devices, interfaces, connections, and ACLs via `DELETE /ingest/wipe`, for starting fresh instead of merging into existing data
 - **3D device icons** — Cisco photorealistic PNG icons (router, switch, firewall, server, host) committed in the repo; gradient SVG originals also included
 
 ---
@@ -200,47 +218,56 @@ TreasureMap/
 │   ├── models.py               # Pydantic models (Device, Interface, Connection, Acl)
 │   ├── pop_detector.py         # Hostname → POP / role detection
 │   ├── create_indices.py       # Standalone index creation script
+│   ├── connection_discovery.py # 🔗 Discover — subnet/description/CDP-LLDP matching
+│   ├── ingest.py               # CLI bulk ingest: python ingest.py --config-dir PATH
+│   ├── ingest_batfish.py       # Standalone experiment — parses Batfish sample data
+│   │                           #   into a separate "network-configs" ES index; not
+│   │                           #   part of the main app (not imported by main.py)
+│   ├── topology.py             # Standalone experiment, same Batfish sandbox as above
+│   │                           #   (distinct from routers/topology.py, which IS live)
 │   ├── parsers/
-│   │   ├── __init__.py
-│   │   ├── ios_config.py       # Cisco IOS / IOS-XE / NX-OS / ASA
-│   │   ├── juniper.py          # Juniper JunOS (hierarchical + set-format)
-│   │   ├── huawei.py           # Huawei VRP
-│   │   ├── dell.py             # Dell OS10 / Enterprise SONiC
-│   │   └── hpe.py              # HPE Aruba OS-CX
+│   │   ├── __init__.py         # Only exports juniper, huawei, cisco — see below
+│   │   ├── cisco.py            # ✅ Cisco IOS / IOS-XE / NX-OS — wired in
+│   │   ├── juniper.py          # ✅ Juniper JunOS (hierarchical + set-format) — wired in
+│   │   ├── huawei.py           # ✅ Huawei VRP — wired in
+│   │   ├── dell.py             # 🚧 Dell OS10 / Enterprise SONiC — written, not wired in
+│   │   ├── hpe.py              # 🚧 HPE Aruba OS-CX — written, not wired in
+│   │   └── ios_config.py       # 🚧 Standalone Cisco parser used only by ingest_batfish.py,
+│   │                           #   unrelated to parsers/cisco.py
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   ├── devices.py          # /devices CRUD
-│   │   ├── topology.py         # /topology graph builder
-│   │   ├── pathfind.py         # /pathfind BFS
-│   │   └── ingest.py           # /ingest/stream (SSE) + /ingest/upload
+│   │   ├── topology.py         # /topology graph builder (the live one)
+│   │   ├── pathfind.py         # /pathfind BFS + /pathfind/search autocomplete
+│   │   └── ingest.py           # /ingest/config, /ingest/discover-connections,
+│   │                           #   /ingest/pops, /ingest/devices/{name}/pop
 │   └── data/                   # Sample configs (mounted at /app/data in Docker)
-│       ├── sample_ios.cfg
 │       ├── sample_junos.txt
 │       ├── sample_junos_set.txt
 │       ├── sample_huawei.txt
-│       ├── sample_dell.txt
-│       └── sample_hpe.txt
+│       ├── sample_dell.txt     # 🚧 Present, but Dell parser isn't wired in yet
+│       ├── sample_hpe.txt      # 🚧 Present, but HPE parser isn't wired in yet
+│       └── sample_network.py   # Built-in synthetic sample network, loaded on startup
 ├── frontend/
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   ├── package.json
 │   ├── vite.config.js
 │   ├── public/
-│   │   └── icons/              # SVG device icons (committed)
-│   │       ├── router.svg
-│   │       ├── switch.svg
-│   │       ├── firewall.svg
-│   │       ├── server.svg
-│   │       └── host.svg
+│   │   └── icons/              # PNG + SVG device icons (committed), plus the full
+│   │                           #   Cisco EPS icon pack the PNGs were rendered from
 │   └── src/
-│       ├── App.jsx
+│       ├── App.jsx             # Owns the live ingest panel + 🔗 Discover button
+│       ├── TopologyMap.jsx     # 🚧 Not imported anywhere — orphaned earlier draft
 │       └── components/
-│           ├── TopologyGraph.jsx
-│           ├── DeviceDetails.jsx
-│           ├── IngestModal.jsx
-│           ├── PathSearch.jsx
-│           ├── PopAssignModal.jsx
-│           └── TextualView.jsx
+│           ├── TopologyGraph.jsx   # ✅ live — imported by App.jsx
+│           ├── DeviceDetails.jsx   # ✅ live
+│           ├── PathSearch.jsx      # ✅ live
+│           ├── PopAssignModal.jsx  # ✅ live
+│           ├── TextualView.jsx     # ✅ live
+│           └── IngestModal.jsx     # 🚧 not imported by App.jsx — calls
+│                                   #   /api/ingest/upload and /api/ingest/stream,
+│                                   #   neither of which exist in routers/ingest.py
 ├── elasticsearch/
 │   └── config/
 │       └── elasticsearch.yml   # Single-node, no auth (dev)
@@ -251,13 +278,15 @@ TreasureMap/
     └── TROUBLESHOOTING.md
 ```
 
+> The 🚧 items above are real files in the repo, not placeholders — they're just not connected to the running application yet. Worth a future session to either finish wiring them in or remove them so the structure isn't misleading.
+
 ---
 
 ## Config File Format by Vendor
 
 ### Cisco IOS / IOS-XE / NX-OS
 
-Standard `show running-config` output. Files with `.cfg`, `.conf`, or `.txt` extensions are scanned automatically by the folder ingester.
+Standard `show running-config` output. Files with `.txt`, `.conf`, `.cfg`, `.log`, or `.config` extensions are picked up by both the UI ingest panel and the `ingest.py --config-dir` CLI scan.
 
 ```
 hostname nyc-core-rtr-01
@@ -309,7 +338,7 @@ bgp 65002
  peer 10.1.0.2 as-number 65000
 ```
 
-### Dell OS10
+### Dell OS10 🚧 *(parser exists, not yet wired into ingest — uploading one of these today will be parsed as Cisco and produce garbage)*
 
 Detection requires `hostname` **and** at least one `interface ethernet` line.
 
@@ -321,7 +350,7 @@ interface ethernet1/1/1
  switchport trunk allowed vlan 10,20,30
 ```
 
-### HPE Aruba OS-CX
+### HPE Aruba OS-CX 🚧 *(parser exists, not yet wired into ingest — same caveat as Dell above)*
 
 Detection requires `hostname` **and** at least one `interface N/N/N` (digit/digit/digit) line, plus either `vlan trunk/access` syntax or `vrf mgmt`.
 

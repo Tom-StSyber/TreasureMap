@@ -12,6 +12,12 @@ PATCH /ingest/devices/{name}/pop
 
 GET /ingest/pops
     List all known POP labels (from devices that have a pop field set).
+
+DELETE /ingest/wipe
+    Delete all devices, interfaces, connections, and ACLs and recreate
+    empty indices. Used by the "🗑 Clear Map" button in the UI — lets a
+    user start over before importing a new set of configs instead of
+    merging into whatever was previously ingested.
 """
 from __future__ import annotations
 import logging
@@ -215,6 +221,30 @@ def list_pops():
         for b in buckets
         if b["key"] != "__unassigned__"
     ]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Clear map
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.delete("/wipe")
+def wipe_all():
+    """
+    Delete every device, interface, connection, and ACL currently in
+    Elasticsearch and recreate empty indices.
+
+    This is destructive and irreversible — the frontend is expected to
+    confirm with the user before calling this. There's no soft-delete or
+    undo; if you need the data back, re-ingest the original config files.
+    """
+    from es_client import wipe_indices
+    try:
+        wipe_indices()
+    except Exception as exc:
+        log.exception("Wipe failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    log.warning("All TreasureMap indices wiped via /ingest/wipe")
+    return {"status": "ok", "message": "All devices, interfaces, connections, and ACLs deleted."}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
