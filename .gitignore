@@ -1,82 +1,34 @@
-# ── Python ────────────────────────────────────────────────────────────────────
+# ── Lab-environment / security documents — NEVER push to the public repo ──
+# These describe the internal lab environment and network posture.
+SECURITY_REVIEW.md
+*.secret.md
+
+# ── Python ──
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
-.eggs/
-*.egg
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Virtual environments
 .venv/
 venv/
-env/
-ENV/
+*.egg-info/
 
-# ── Node ──────────────────────────────────────────────────────────────────────
+# ── Node / frontend ──
 node_modules/
 frontend/dist/
-frontend/.vite/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+dist/
 
-# ── Elasticsearch (binaries – only config is committed) ───────────────────────
-elasticsearch/server/
-elasticsearch/data/
-elasticsearch/logs/
-elasticsearch/*.zip
-elasticsearch/*.tar.gz
-
-# ── Environment / secrets ─────────────────────────────────────────────────────
+# ── Env / secrets ──
 .env
-backend/.env
-frontend/.env
+.env.*
 !.env.example
-!backend/.env.example
 
-# ── IDE / OS ──────────────────────────────────────────────────────────────────
+# ── Editor / OS cruft ──
 .vscode/
 .idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
 .DS_Store
 Thumbs.db
-desktop.ini
 
-# ── Logs / runtime ────────────────────────────────────────────────────────────
-*.log
-logs/
-nohup.out
-pids/
-*.pid
-
-# ── Test / coverage ───────────────────────────────────────────────────────────
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
-
-# ── Nested repos / large downloaded datasets ──────────────────────────────────
 data/batfish/
 data/samples/ntc-templates/
-data/devnet-sandboxes/
 
-# ── Root-level venv (should be backend/.venv) ─────────────────────────────────
-/.venv/
+nohup.out
 
-# ── Cisco icon pack (EPS / JPG — large binary files, download separately) ────
-# Download from: https://www.cisco.com/c/en/us/about/brand-center/network-topology-icons.html
-frontend/public/icons/*.eps
-frontend/public/icons/*.jpg
-frontend/public/icons/*.jpeg
-frontend/public/icons/Icon_Cache.db
-frontend/public/icons/test.txt
-frontend/package-lock.json
+*.eps

@@ -12,12 +12,6 @@ PATCH /ingest/devices/{name}/pop
 
 GET /ingest/pops
     List all known POP labels (from devices that have a pop field set).
-
-DELETE /ingest/wipe
-    Delete all devices, interfaces, connections, and ACLs and recreate
-    empty indices. Used by the "🗑 Clear Map" button in the UI — lets a
-    user start over before importing a new set of configs instead of
-    merging into whatever was previously ingested.
 """
 from __future__ import annotations
 import logging
@@ -33,6 +27,34 @@ from pop_detector import detect_pop, detect_role
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 log = logging.getLogger(__name__)
+
+# Maximum accepted config upload. Generous headroom over real-world configs
+# (a large stacked/chassis running-config with show-tech appended is well under
+# this); the cap exists to stop unbounded/oversized uploads from exhausting
+# memory. See SECURITY_REVIEW.md M-4. Bump if a legitimate file ever exceeds it.
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+async def _read_capped(upload: UploadFile, cap: int) -> bytes:
+    """
+    Read an UploadFile in chunks, aborting with HTTP 413 as soon as the
+    cumulative size exceeds `cap`. Never buffers more than `cap` bytes, so a
+    hostile or accidental huge upload cannot blow up API memory.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)  # 1 MB at a time
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > cap:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Config file exceeds the {cap // (1024 * 1024)} MB upload limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -89,7 +111,7 @@ async def ingest_config(
       hostname  — device hostname (used as the document ID; auto-detected if "unknown")
       vendor    — cisco | juniper | huawei | auto (default: auto)
     """
-    raw = (await file.read()).decode("utf-8", errors="replace")
+    raw = (await _read_capped(file, MAX_UPLOAD_BYTES)).decode("utf-8", errors="replace")
 
     # Auto-detect vendor
     resolved_vendor = vendor if vendor != "auto" else _detect_vendor(raw)
@@ -221,30 +243,6 @@ def list_pops():
         for b in buckets
         if b["key"] != "__unassigned__"
     ]
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Clear map
-# ──────────────────────────────────────────────────────────────────────────────
-
-@router.delete("/wipe")
-def wipe_all():
-    """
-    Delete every device, interface, connection, and ACL currently in
-    Elasticsearch and recreate empty indices.
-
-    This is destructive and irreversible — the frontend is expected to
-    confirm with the user before calling this. There's no soft-delete or
-    undo; if you need the data back, re-ingest the original config files.
-    """
-    from es_client import wipe_indices
-    try:
-        wipe_indices()
-    except Exception as exc:
-        log.exception("Wipe failed")
-        raise HTTPException(status_code=500, detail=str(exc))
-    log.warning("All TreasureMap indices wiped via /ingest/wipe")
-    return {"status": "ok", "message": "All devices, interfaces, connections, and ACLs deleted."}
 
 
 # ──────────────────────────────────────────────────────────────────────────────

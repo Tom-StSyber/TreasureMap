@@ -14,7 +14,12 @@ services:
       - xpack.security.http.ssl.enabled=false
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
     ports:
-      - "9200:9200"
+      # Bound to loopback only — reachable from the host and from other
+      # containers (via the compose network name "elasticsearch:9200"),
+      # but NOT from other machines on the LAN. Security is disabled during
+      # testing, so this binding is the control that prevents unauthenticated
+      # remote read/delete of the datastore.
+      - "127.0.0.1:9200:9200"
     volumes:
       - esdata:/usr/share/elasticsearch/data
     healthcheck:
@@ -31,7 +36,9 @@ services:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - xpack.security.enabled=false
     ports:
-      - "5601:5601"
+      # Loopback only — access Kibana from the host directly, or via an
+      # SSH tunnel from another machine. Not exposed to the LAN.
+      - "127.0.0.1:5601:5601"
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -51,8 +58,10 @@ services:
       elasticsearch:
         condition: service_healthy
     restart: unless-stopped
-    volumes:
-      - ./backend:/app                          # live-reload for dev
+    # NOTE: the source bind-mount (./backend:/app) was removed — it let anything
+    # that could write the host dir change running server code, and only existed
+    # to support --reload (also removed). For hot-reload dev, run uvicorn from the
+    # host venv per INSTALL.md, or use a docker-compose.override.yml. See M-1.
 
   frontend:
     build:

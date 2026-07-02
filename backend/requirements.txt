@@ -1,8 +1,10 @@
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-elasticsearch==8.13.0
-pydantic==2.7.1
-python-dotenv==1.0.1
+# Security bumps 2026-07-01 (see SECURITY_REVIEW.md H-3). Verified clean with pip-audit.
+fastapi==0.139.0            # was 0.111.0 — pulls patched Starlette 1.x
+starlette==1.3.1           # pinned explicitly; clears CVE-2024-47874 + 2025/2026 DoS advisories
+uvicorn[standard]==0.49.0  # was 0.29.0
+elasticsearch==8.13.0      # kept — matches ES server 8.13; no known advisory; avoids newer-client body= deprecation
+pydantic==2.13.4           # was 2.7.1 (compat with fastapi 0.139)
+python-dotenv==1.2.2       # was 1.0.1 — clears CVE-2026-28684
+python-multipart==0.0.32   # was 0.0.9 — clears CVE-2024-53981 + later multipart DoS advisories
 networkx==3.3
-python-multipart==0.0.9
 ipaddress; python_version<"3.3"
